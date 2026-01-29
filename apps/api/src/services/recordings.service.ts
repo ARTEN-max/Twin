@@ -10,9 +10,9 @@ export interface CreateRecordingInput {
   userId: string;
   title: string;
   mode: RecordingMode;
-  originalFilename: string;
+  originalFilename?: string;
   mimeType: string;
-  fileSize: number;
+  fileSize?: number;
 }
 
 export interface RecordingWithRelations {

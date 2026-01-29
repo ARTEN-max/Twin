@@ -65,6 +65,9 @@ const envSchema = z.object({
   // Upload Limits
   MAX_UPLOAD_SIZE_MB: z.coerce.number().int().positive().default(500),
 
+  // Optional server-side transcoding (for MediaRecorder webm/ogg compatibility)
+  ENABLE_FFMPEG_TRANSCODE: z.coerce.boolean().default(false),
+
   // Sentry (optional)
   SENTRY_DSN: z.string().url().optional(),
   SENTRY_ENVIRONMENT: z.string().optional(),

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
@@ -12,11 +12,17 @@ import {
   AlertCircle,
   Loader2,
   Download,
+  Copy,
   RefreshCw,
   FileText,
   LayoutList,
 } from 'lucide-react';
-import { useRecordingWithPolling, useRetryDebrief, useRecordingJobs } from '@/hooks/use-recordings';
+import {
+  useRecordingWithBackoffPolling,
+  useRecordingJobsWithBackoffPolling,
+  useRetryDebrief,
+  useRetryTranscription,
+} from '@/hooks/use-recordings';
 import { getDownloadUrl } from '@/lib/api';
 import { useUserId } from '@/lib/auth';
 import { cn } from '@komuchi/ui';
@@ -72,6 +78,114 @@ function ProcessingStatus() {
   );
 }
 
+type StepState = 'pending' | 'current' | 'complete' | 'failed';
+
+function getStepIcon(state: StepState) {
+  if (state === 'complete') return CheckCircle;
+  if (state === 'failed') return AlertCircle;
+  if (state === 'current') return Loader2;
+  return Clock;
+}
+
+function stepClasses(state: StepState) {
+  if (state === 'complete') return { dot: 'bg-emerald-500', text: 'text-emerald-700', ring: 'ring-emerald-100' };
+  if (state === 'failed') return { dot: 'bg-red-500', text: 'text-red-700', ring: 'ring-red-100' };
+  if (state === 'current') return { dot: 'bg-amber-500', text: 'text-amber-700', ring: 'ring-amber-100' };
+  return { dot: 'bg-slate-300', text: 'text-slate-600', ring: 'ring-slate-100' };
+}
+
+function deriveTimeline(params: {
+  recordingStatus: string;
+  hasTranscript: boolean;
+  hasDebrief: boolean;
+  jobs?: Array<{ type: 'TRANSCRIBE' | 'DEBRIEF'; status: string }>;
+}): Array<{ key: string; title: string; state: StepState; subtitle?: string }> {
+  const { recordingStatus, hasTranscript, hasDebrief, jobs } = params;
+  const transcribeJobs = (jobs ?? []).filter((j) => j.type === 'TRANSCRIBE');
+  const debriefJobs = (jobs ?? []).filter((j) => j.type === 'DEBRIEF');
+
+  const any = (arr: Array<{ status: string }>, pred: (s: string) => boolean) =>
+    arr.some((j) => pred(j.status));
+
+  const transcribeFailed = any(transcribeJobs, (s) => s === 'failed') && !hasTranscript;
+  const transcribeDone = hasTranscript || any(transcribeJobs, (s) => s === 'complete');
+  const transcribeActive = any(transcribeJobs, (s) => s === 'pending' || s === 'running') || recordingStatus === 'processing';
+
+  const debriefFailed = any(debriefJobs, (s) => s === 'failed') && !hasDebrief;
+  const debriefDone = hasDebrief || any(debriefJobs, (s) => s === 'complete');
+  const debriefActive =
+    any(debriefJobs, (s) => s === 'pending' || s === 'running') ||
+    (transcribeDone && (recordingStatus === 'processing' || recordingStatus === 'uploaded'));
+
+  const uploadedState: StepState =
+    recordingStatus === 'pending' ? 'pending' : recordingStatus === 'failed' && !transcribeDone && !hasTranscript ? 'failed' : 'complete';
+
+  const transcribingState: StepState = transcribeFailed
+    ? 'failed'
+    : transcribeDone
+      ? 'complete'
+      : transcribeActive || uploadedState === 'complete'
+        ? 'current'
+        : 'pending';
+
+  const debriefingState: StepState = debriefFailed
+    ? 'failed'
+    : debriefDone
+      ? 'complete'
+      : debriefActive
+        ? 'current'
+        : 'pending';
+
+  const completeState: StepState =
+    recordingStatus === 'complete' && hasDebrief
+      ? 'complete'
+      : recordingStatus === 'failed' && !hasDebrief
+        ? 'failed'
+        : debriefingState === 'complete'
+          ? 'current'
+          : 'pending';
+
+  return [
+    { key: 'uploaded', title: 'Uploaded', state: uploadedState },
+    { key: 'transcribing', title: 'Transcribing', state: transcribingState },
+    { key: 'debriefing', title: 'Debriefing', state: debriefingState },
+    { key: 'complete', title: 'Complete', state: completeState },
+  ];
+}
+
+function ProcessingTimeline({
+  timeline,
+}: {
+  timeline: Array<{ key: string; title: string; state: StepState; subtitle?: string }>;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-6">
+      <h3 className="mb-4 text-sm font-semibold text-slate-900">Processing steps</h3>
+      <ol className="space-y-4">
+        {timeline.map((step, idx) => {
+          const Icon = getStepIcon(step.state);
+          const cls = stepClasses(step.state);
+          const isLast = idx === timeline.length - 1;
+          return (
+            <li key={step.key} className="relative flex gap-3">
+              <div className="relative">
+                <div className={cn('flex h-8 w-8 items-center justify-center rounded-full ring-8', cls.dot, cls.ring)}>
+                  <Icon className={cn('h-4 w-4 text-white', step.state === 'current' && 'animate-spin')} />
+                </div>
+                {!isLast && <div className="absolute left-1/2 top-8 h-6 w-px -translate-x-1/2 bg-slate-200" />}
+              </div>
+              <div className="pt-1">
+                <p className={cn('text-sm font-semibold', cls.text)}>{step.title}</p>
+                {step.subtitle ? <p className="text-xs text-slate-500">{step.subtitle}</p> : null}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
 function TranscriptView({ text, segments }: { text: string; segments?: Array<{ start: number; end: number; text: string; speaker?: string }> | null }) {
   if (segments && segments.length > 0) {
     return (
@@ -111,51 +225,42 @@ function DebriefView({ markdown }: { markdown: string }) {
   );
 }
 
-interface JobInfo {
-  id: string;
-  type: 'TRANSCRIBE' | 'DEBRIEF';
-  status: string;
-}
-
-function JobsStatus({ jobs }: { jobs?: JobInfo[] }) {
-  if (!jobs || jobs.length === 0) return null;
-
-  return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-      <h4 className="mb-3 text-sm font-semibold text-slate-700">Processing Jobs</h4>
-      <div className="space-y-2">
-        {jobs.map((job) => {
-          const config = STATUS_CONFIG[job.status] || STATUS_CONFIG.pending;
-          const Icon = config.icon;
-          return (
-            <div key={job.id} className="flex items-center justify-between text-sm">
-              <span className="text-slate-600">
-                {job.type === 'TRANSCRIBE' ? 'Transcription' : 'Debrief Generation'}
-              </span>
-              <span className={cn('flex items-center gap-1.5', config.color)}>
-                <Icon className={cn('h-4 w-4', config.animate && 'animate-spin')} />
-                {config.label}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 export default function RecordingDetailPage() {
   const params = useParams();
   const recordingId = params.id as string;
   const userId = useUserId();
   const [activeTab, setActiveTab] = useState<Tab>('debrief');
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isCopying, setIsCopying] = useState(false);
+  const [copyLabel, setCopyLabel] = useState<string>('Copy debrief');
 
-  const { data: recording, isLoading, isError } = useRecordingWithPolling(recordingId);
-  const { data: jobs } = useRecordingJobs(recordingId);
+  const { data: recording, isLoading, isError } = useRecordingWithBackoffPolling(recordingId);
+  const { data: jobs } = useRecordingJobsWithBackoffPolling(recordingId);
   const retryDebrief = useRetryDebrief();
+  const retryTranscription = useRetryTranscription();
 
-  const handleDownload = async () => {
+  // Derive status/timeline in a hook-safe way (must run on every render, even while loading).
+  const hasFailedJob = jobs?.some((job) => job.status === 'failed') ?? false;
+  const hasTranscript = !!recording?.transcript;
+  const hasDebrief = !!recording?.debrief;
+  const isMockTranscript =
+    recording?.transcript?.text?.trim() === 'This is a mock transcription result.';
+
+  const effectiveStatus =
+    recording?.status ? (hasFailedJob && !hasDebrief ? 'failed' : recording.status) : 'pending';
+
+  const timeline = useMemo(
+    () =>
+      deriveTimeline({
+        recordingStatus: effectiveStatus,
+        hasTranscript,
+        hasDebrief,
+        jobs: jobs?.map((j) => ({ type: j.type, status: j.status })),
+      }),
+    [effectiveStatus, hasDebrief, hasTranscript, jobs]
+  );
+
+  const handleDownloadAudio = async () => {
     if (!recording) return;
     setIsDownloading(true);
     try {
@@ -172,8 +277,56 @@ export default function RecordingDetailPage() {
     }
   };
 
+  const handleDownloadTranscript = () => {
+    if (!recording?.transcript?.text) return;
+    const title = (recording.title || 'transcript').replace(/[^\w\s.-]/g, '').replace(/\s+/g, '_').slice(0, 80);
+    const filename = `${title || 'transcript'}.txt`;
+
+    const blob = new Blob([recording.transcript.text], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleCopyDebrief = async () => {
+    const text = recording?.debrief?.markdown;
+    if (!text) return;
+    setIsCopying(true);
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        // fallback
+        const el = document.createElement('textarea');
+        el.value = text;
+        el.style.position = 'fixed';
+        el.style.left = '-9999px';
+        document.body.appendChild(el);
+        el.focus();
+        el.select();
+        document.execCommand('copy');
+        document.body.removeChild(el);
+      }
+      setCopyLabel('Copied!');
+      setTimeout(() => setCopyLabel('Copy debrief'), 1500);
+    } catch (e) {
+      console.error('Copy failed:', e);
+      setCopyLabel('Copy failed');
+      setTimeout(() => setCopyLabel('Copy debrief'), 1500);
+    } finally {
+      setIsCopying(false);
+    }
+  };
+
   const handleRetryDebrief = () => {
     retryDebrief.mutate(recordingId);
+  };
+
+  const handleRetryTranscription = () => {
+    retryTranscription.mutate(recordingId);
   };
 
   if (isLoading) {
@@ -200,13 +353,6 @@ export default function RecordingDetailPage() {
     );
   }
 
-  // Check job statuses to determine actual state
-  const hasFailedJob = jobs?.some((job) => job.status === 'failed');
-  const hasTranscript = !!recording.transcript;
-  const hasDebrief = !!recording.debrief;
-
-  // Determine effective status
-  const effectiveStatus = hasFailedJob && !hasDebrief ? 'failed' : recording.status;
   const statusConfig = STATUS_CONFIG[effectiveStatus] || STATUS_CONFIG.pending;
   const StatusIcon = statusConfig.icon;
   const isProcessing = (effectiveStatus === 'processing' || effectiveStatus === 'uploaded') && !hasFailedJob;
@@ -251,30 +397,53 @@ export default function RecordingDetailPage() {
               {statusConfig.label}
             </span>
 
-            {/* Download button */}
-            {recording.objectKey && (
+            <div className="flex items-center gap-2">
+              {/* Copy Debrief */}
               <button
-                onClick={handleDownload}
-                disabled={isDownloading}
-                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                onClick={handleCopyDebrief}
+                disabled={!recording.debrief?.markdown || isCopying}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                title="Copy debrief markdown to clipboard"
               >
-                {isDownloading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Download className="h-4 w-4" />
-                )}
-                Download
+                {isCopying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />}
+                {copyLabel}
               </button>
-            )}
+
+              {/* Download transcript */}
+              <button
+                onClick={handleDownloadTranscript}
+                disabled={!recording.transcript?.text}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                title="Download transcript as .txt"
+              >
+                <FileText className="h-4 w-4" />
+                Download transcript
+              </button>
+
+              {/* Download audio (optional) */}
+              {recording.objectKey && (
+                <button
+                  onClick={handleDownloadAudio}
+                  disabled={isDownloading}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  title="Download original audio"
+                >
+                  {isDownloading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Download className="h-4 w-4" />
+                  )}
+                  Audio
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* Jobs status */}
-        {isProcessing && (
-          <div className="mt-6">
-            <JobsStatus jobs={jobs} />
-          </div>
-        )}
+        {/* Processing timeline */}
+        <div className="mt-6">
+          <ProcessingTimeline timeline={timeline} />
+        </div>
       </div>
 
       {/* Processing state */}
@@ -300,6 +469,17 @@ export default function RecordingDetailPage() {
             >
               <RefreshCw className={cn('h-4 w-4', retryDebrief.isPending && 'animate-spin')} />
               Retry Debrief Generation
+            </button>
+          )}
+
+          {(isMockTranscript || !hasTranscript) && recording.objectKey && (
+            <button
+              onClick={handleRetryTranscription}
+              disabled={retryTranscription.isPending}
+              className="mt-3 inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+            >
+              <RefreshCw className={cn('h-4 w-4', retryTranscription.isPending && 'animate-spin')} />
+              Retry Transcription (regenerates debrief)
             </button>
           )}
         </div>

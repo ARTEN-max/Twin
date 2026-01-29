@@ -50,10 +50,6 @@ function getBucket(): string {
   return getEnv().S3_BUCKET;
 }
 
-function getMaxFileSize(): number {
-  return getEnv().MAX_UPLOAD_SIZE_MB * 1024 * 1024;
-}
-
 const UPLOAD_EXPIRES_IN = 60 * 60; // 1 hour for uploads
 const DOWNLOAD_EXPIRES_IN = 60 * 60 * 24; // 24 hours for downloads
 
@@ -139,23 +135,17 @@ export function getExtensionFromMimeType(mimeType: string): string {
 export async function getPresignedUploadUrl(
   userId: string,
   recordingId: string,
-  filename: string,
   mimeType: string,
-  fileSize: number
+  filename?: string
 ): Promise<PresignedUploadResult> {
-  const maxSize = getMaxFileSize();
-
   // Validate MIME type
   if (!isAllowedMimeType(mimeType)) {
     throw new Error(`Invalid MIME type: ${mimeType}. Allowed: ${ALLOWED_MIME_TYPES.join(', ')}`);
   }
 
-  // Validate file size
-  if (fileSize > maxSize) {
-    throw new Error(`File too large: ${fileSize} bytes. Max: ${maxSize} bytes (${getEnv().MAX_UPLOAD_SIZE_MB}MB)`);
-  }
+  const finalFilename = filename ?? `recording.${getExtensionFromMimeType(mimeType)}`;
 
-  const objectKey = generateObjectKey(userId, recordingId, filename);
+  const objectKey = generateObjectKey(userId, recordingId, finalFilename);
   const client = getS3Client();
   const bucket = getBucket();
 
@@ -163,11 +153,10 @@ export async function getPresignedUploadUrl(
     Bucket: bucket,
     Key: objectKey,
     ContentType: mimeType,
-    ContentLength: fileSize,
     Metadata: {
       'user-id': userId,
       'recording-id': recordingId,
-      'original-filename': filename,
+      'original-filename': finalFilename,
     },
   });
 

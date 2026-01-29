@@ -15,6 +15,7 @@ export {
   startTranscriptionWorker,
   stopTranscriptionWorker,
   enqueueTranscriptionJob,
+  retryTranscriptionJob,
 } from './transcription.queue.js';
 
 // Debrief queue exports

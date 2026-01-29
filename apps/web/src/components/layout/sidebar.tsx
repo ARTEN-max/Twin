@@ -14,6 +14,7 @@ import { cn } from '@komuchi/ui';
 
 const navigation = [
   { name: 'Recordings', href: '/recordings', icon: List },
+  { name: 'Record', href: '/recordings/record', icon: Mic },
   { name: 'New Recording', href: '/recordings/new', icon: PlusCircle },
 ];
 

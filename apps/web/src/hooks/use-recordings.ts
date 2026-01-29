@@ -1,6 +1,7 @@
 'use client';
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef } from 'react';
 import {
   getRecordings,
   getRecording,
@@ -9,7 +10,7 @@ import {
   completeUpload,
   uploadToS3,
   retryDebrief,
-  type Recording,
+  retryTranscription,
   type RecordingWithRelations,
   type Job,
 } from '@/lib/api';
@@ -82,6 +83,80 @@ export function useRecordingWithPolling(recordingId: string) {
   });
 }
 
+function backoffDelayMs(attempt: number): number {
+  // 1.5s, 3s, 6s, 12s, 20s (cap) + jitter
+  const base = Math.min(1500 * Math.pow(2, Math.max(0, attempt)), 20000);
+  const jitter = Math.floor(Math.random() * 250);
+  return base + jitter;
+}
+
+function isTerminalRecordingState(data?: RecordingWithRelations): boolean {
+  if (!data) return false;
+  if (data.status === 'failed') return true;
+  return data.status === 'complete' && !!data.debrief;
+}
+
+/**
+ * Fetch recording and auto-refetch with exponential backoff until:
+ * - failed, or
+ * - complete AND debrief exists
+ *
+ * Designed for the Recording detail page.
+ */
+export function useRecordingWithBackoffPolling(recordingId: string) {
+  const userId = useUserId();
+
+  const query = useQuery({
+    queryKey: recordingKeys.detail(recordingId),
+    queryFn: () => getRecording(userId, recordingId, true),
+  });
+
+  const attemptRef = useRef(0);
+  const timeoutRef = useRef<number | null>(null);
+  const lastKeyRef = useRef<string>('');
+
+  useEffect(() => {
+    attemptRef.current = 0;
+    if (timeoutRef.current) {
+      window.clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+    lastKeyRef.current = '';
+  }, [recordingId]);
+
+  useEffect(() => {
+    const key = `${query.data?.status ?? ''}-${query.data?.transcript ? 't' : 'f'}-${query.data?.debrief ? 't' : 'f'}`;
+    // If we observe meaningful progress, reset backoff so the UI feels responsive.
+    if (key && key !== lastKeyRef.current) {
+      attemptRef.current = 0;
+      lastKeyRef.current = key;
+    }
+
+    if (isTerminalRecordingState(query.data)) {
+      if (timeoutRef.current) {
+        window.clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+      return;
+    }
+
+    const delay = backoffDelayMs(attemptRef.current);
+    timeoutRef.current = window.setTimeout(async () => {
+      attemptRef.current += 1;
+      await query.refetch();
+    }, delay);
+
+    return () => {
+      if (timeoutRef.current) {
+        window.clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+    };
+  }, [query.data, query.refetch]);
+
+  return query;
+}
+
 /**
  * Fetch jobs for a recording
  */
@@ -100,6 +175,73 @@ export function useRecordingJobs(recordingId: string) {
       return hasActiveJob ? 3000 : false;
     },
   });
+}
+
+function isTerminalJobsState(jobs?: Job[]): boolean {
+  if (!jobs || jobs.length === 0) return false;
+  const hasActiveJob = jobs.some((j) => j.status === 'pending' || j.status === 'running');
+  return !hasActiveJob;
+}
+
+/**
+ * Fetch jobs and auto-refetch with exponential backoff until all jobs are done.
+ * Designed for the Recording detail page.
+ */
+export function useRecordingJobsWithBackoffPolling(recordingId: string) {
+  const userId = useUserId();
+
+  const query = useQuery({
+    queryKey: recordingKeys.jobs(recordingId),
+    queryFn: () => getRecordingJobs(userId, recordingId),
+  });
+
+  const attemptRef = useRef(0);
+  const timeoutRef = useRef<number | null>(null);
+  const lastKeyRef = useRef<string>('');
+
+  useEffect(() => {
+    attemptRef.current = 0;
+    if (timeoutRef.current) {
+      window.clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+    lastKeyRef.current = '';
+  }, [recordingId]);
+
+  useEffect(() => {
+    const key =
+      query.data
+        ?.map((j) => `${j.type}:${j.status}`)
+        .sort()
+        .join('|') ?? '';
+    if (key && key !== lastKeyRef.current) {
+      attemptRef.current = 0;
+      lastKeyRef.current = key;
+    }
+
+    if (isTerminalJobsState(query.data)) {
+      if (timeoutRef.current) {
+        window.clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+      return;
+    }
+
+    const delay = backoffDelayMs(attemptRef.current);
+    timeoutRef.current = window.setTimeout(async () => {
+      attemptRef.current += 1;
+      await query.refetch();
+    }, delay);
+
+    return () => {
+      if (timeoutRef.current) {
+        window.clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+    };
+  }, [query.data, query.refetch]);
+
+  return query;
 }
 
 /**
@@ -125,9 +267,7 @@ export function useUploadRecording() {
       const { recordingId, uploadUrl } = await createRecording(userId, {
         title,
         mode,
-        filename: file.name,
         mimeType: file.type,
-        fileSize: file.size,
       });
 
       // Step 2: Upload to S3
@@ -162,6 +302,22 @@ export function useRetryDebrief() {
       queryClient.invalidateQueries({
         queryKey: recordingKeys.jobs(recordingId),
       });
+    },
+  });
+}
+
+/**
+ * Retry transcription mutation (re-runs transcription + debrief)
+ */
+export function useRetryTranscription() {
+  const userId = useUserId();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (recordingId: string) => retryTranscription(userId, recordingId),
+    onSuccess: (_, recordingId) => {
+      queryClient.invalidateQueries({ queryKey: recordingKeys.detail(recordingId) });
+      queryClient.invalidateQueries({ queryKey: recordingKeys.jobs(recordingId) });
     },
   });
 }

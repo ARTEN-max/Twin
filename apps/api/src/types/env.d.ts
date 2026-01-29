@@ -37,6 +37,9 @@ declare global {
       // Upload Limits
       MAX_UPLOAD_SIZE_MB?: string;
 
+      // Optional server-side transcoding
+      ENABLE_FFMPEG_TRANSCODE?: string;
+
       // Sentry (Error Tracking)
       SENTRY_DSN?: string;
       SENTRY_ENVIRONMENT?: string;

@@ -151,9 +151,7 @@ export async function createRecording(
   data: {
     title: string;
     mode: string;
-    filename: string;
     mimeType: string;
-    fileSize: number;
   }
 ): Promise<CreateRecordingResponse> {
   const response = await apiFetch<{ data: CreateRecordingResponse }>(
@@ -232,6 +230,17 @@ export async function retryDebrief(
   );
 }
 
+export async function retryTranscription(
+  userId: string,
+  recordingId: string
+): Promise<void> {
+  await apiFetch(
+    `/api/recordings/${recordingId}/retry-transcription`,
+    { method: 'POST' },
+    userId
+  );
+}
+
 export async function getDownloadUrl(
   userId: string,
   recordingId: string
@@ -255,30 +264,15 @@ export async function uploadToS3(
   file: File,
   onProgress?: (progress: number) => void
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-
-    xhr.upload.addEventListener('progress', (event) => {
-      if (event.lengthComputable && onProgress) {
-        const progress = Math.round((event.loaded / event.total) * 100);
-        onProgress(progress);
-      }
-    });
-
-    xhr.addEventListener('load', () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        resolve();
-      } else {
-        reject(new Error(`Upload failed with status ${xhr.status}`));
-      }
-    });
-
-    xhr.addEventListener('error', () => {
-      reject(new Error('Upload failed'));
-    });
-
-    xhr.open('PUT', uploadUrl);
-    xhr.setRequestHeader('Content-Type', file.type);
-    xhr.send(file);
+  const { uploadToPresignedUrl } = await import('./upload');
+  const result = await uploadToPresignedUrl(file, uploadUrl, {
+    contentType: file.type,
+    maxRetries: 3,
+    onProgress: (p) => {
+      if (typeof p.percent === 'number' && onProgress) onProgress(p.percent);
+    },
   });
+  if (!result.ok) {
+    throw new Error(result.message);
+  }
 }

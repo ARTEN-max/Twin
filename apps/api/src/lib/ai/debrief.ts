@@ -1,5 +1,4 @@
 import OpenAI from 'openai';
-import { z } from 'zod';
 import type { DebriefSection } from '@komuchi/shared';
 import { getEnv } from '../env.js';
 
@@ -24,75 +23,62 @@ function getDebriefProvider(): DebriefProvider {
   return provider;
 }
 
-// ============================================
-// Zod Schema for Structured Output
-// ============================================
-
-const debriefSectionSchema = z.object({
-  title: z.string().describe('Section title'),
-  content: z.string().describe('Section content in markdown format'),
-  order: z.number().describe('Display order of this section'),
-});
-
-const debriefOutputSchema = z.object({
-  title: z.string().describe('A concise title for the debrief'),
-  summary: z.string().describe('A 2-3 sentence executive summary'),
-  sections: z.array(debriefSectionSchema).describe('Detailed sections of the debrief'),
-  actionItems: z.array(z.object({
-    description: z.string(),
-    // OpenAI json_schema strict mode requires all keys to be present in `required`,
-    // so we model assignee as nullable (the model will output null when unknown).
-    assignee: z.string().nullable().optional(),
-    priority: z.enum(['low', 'medium', 'high']),
-  })).describe('Action items extracted from the transcript'),
-  // In strict json_schema mode we include these keys as nullable so they can still be "optional" semantically.
-  participants: z.array(z.string()).nullable().optional().describe('List of participants if identifiable'),
-  keyDecisions: z.array(z.string()).nullable().optional().describe('Key decisions made'),
-});
-
-type DebriefOutput = z.infer<typeof debriefOutputSchema>;
+// NOTE: We intentionally do NOT enforce a fixed structured output schema here.
+// The debrief is free-form markdown so it can adapt to the topic/content.
 
 // ============================================
 // System Prompts by Mode
 // ============================================
 
 const SYSTEM_PROMPTS: Record<string, string> = {
-  general: `You are an expert meeting analyst. Analyze the transcript and create a comprehensive debrief.
-Focus on:
-- Key discussion points
-- Decisions made
-- Action items with owners if mentioned
-- Follow-up items
-- Any blockers or concerns raised`,
+  general: `You are an expert conversation analyst.
 
-  meeting: `You are an expert meeting analyst. Analyze this meeting transcript and create a structured debrief.
-Focus on:
-- Meeting objectives and whether they were met
-- Key discussion topics
-- Decisions made
-- Action items with clear owners and deadlines if mentioned
-- Next steps
-- Parking lot items for future discussion`,
+Generate a debrief in Markdown. The format should be tailored to the topic and content of the transcript (do NOT force a fixed template).
 
-  sales: `You are an expert sales analyst. Analyze this sales call transcript and create a detailed debrief.
-Focus on:
-- Prospect/customer pain points mentioned
-- Objections raised and how they were addressed
-- Interest signals and buying indicators
-- Competition mentioned
-- Next steps and commitments
-- Deal stage assessment
-- Action items for follow-up`,
+Guidelines:
+- Start with a short title and a brief summary (2–4 sentences).
+- Choose the most relevant sections based on what happened (e.g., context, key moments, decisions, risks, outcomes, learnings).
+- Include Action Items if any are implied (with owner if mentioned).
+- Keep it scannable with headings and bullet points where appropriate.
+- If the transcript is too short/low quality, say so and provide best-effort notes.`,
 
-  interview: `You are an expert interview analyst. Analyze this interview transcript and create a comprehensive debrief.
-Focus on:
-- Candidate's key strengths demonstrated
-- Areas of concern or gaps
-- Technical competencies assessed
-- Cultural fit indicators
-- Key questions asked and quality of responses
-- Recommendation (if enough information)
-- Follow-up questions for next round`,
+  meeting: `You are an expert meeting analyst.
+
+Generate a debrief in Markdown tailored to this meeting (no fixed template).
+
+Consider including (only if relevant):
+- Objectives & outcomes
+- Decisions
+- Risks / blockers
+- Open questions / parking lot
+- Action items (owner + due date if present)
+- Next steps`,
+
+  sales: `You are an expert sales analyst.
+
+Generate a debrief in Markdown tailored to this call (no fixed template).
+
+Consider including (only if relevant):
+- Customer context & pain points
+- Objections & responses
+- Value props / differentiation
+- Competition
+- Buying signals & risks
+- Next steps / commitments
+- Action items`,
+
+  interview: `You are an expert interview analyst.
+
+Generate a debrief in Markdown tailored to the interview (no fixed template).
+
+Consider including (only if relevant):
+- Strengths & evidence
+- Gaps / risks
+- Technical signals
+- Communication & collaboration
+- Culture signals
+- Recommendation (if supported)
+- Follow-up questions`,
 };
 
 // ============================================
@@ -199,62 +185,9 @@ export async function generateDebrief(
       },
       {
         role: 'user',
-        content: `Please analyze the following transcript titled "${title}" and generate a structured debrief:\n\n${transcriptText}`,
+        content: `Transcript title: "${title}"\nMode: "${mode}"\n\nTranscript:\n${transcriptText}`,
       },
     ],
-    response_format: {
-      type: 'json_schema',
-      json_schema: {
-        name: 'debrief_output',
-        strict: true,
-        schema: {
-          type: 'object',
-          properties: {
-            title: { type: 'string', description: 'A concise title for the debrief' },
-            summary: { type: 'string', description: 'A 2-3 sentence executive summary' },
-            sections: {
-              type: 'array',
-              items: {
-                type: 'object',
-                properties: {
-                  title: { type: 'string' },
-                  content: { type: 'string' },
-                  order: { type: 'number' },
-                },
-                required: ['title', 'content', 'order'],
-                additionalProperties: false,
-              },
-            },
-            actionItems: {
-              type: 'array',
-              items: {
-                type: 'object',
-                properties: {
-                  description: { type: 'string' },
-                  // In strict json_schema mode, OpenAI requires `required` to include
-                  // every key in `properties`, so we make assignee required but nullable.
-                  assignee: { type: ['string', 'null'] },
-                  priority: { type: 'string', enum: ['low', 'medium', 'high'] },
-                },
-                required: ['description', 'assignee', 'priority'],
-                additionalProperties: false,
-              },
-            },
-            participants: {
-              type: ['array', 'null'],
-              items: { type: 'string' },
-            },
-            keyDecisions: {
-              type: ['array', 'null'],
-              items: { type: 'string' },
-            },
-          },
-          // OpenAI json_schema strict requires `required` to include every key in `properties`.
-          required: ['title', 'summary', 'sections', 'actionItems', 'participants', 'keyDecisions'],
-          additionalProperties: false,
-        },
-      },
-    },
     temperature: 0.3, // Lower temperature for more consistent output
     max_tokens: 4000,
   });
@@ -264,21 +197,8 @@ export async function generateDebrief(
     throw new Error('No content in OpenAI response');
   }
 
-  // Parse the structured output
-  const parsed: DebriefOutput = JSON.parse(content);
-
-  // Validate with Zod
-  const validated = debriefOutputSchema.parse(parsed);
-
-  // Convert to markdown
-  const markdown = generateMarkdown(validated);
-
-  // Extract sections for DB storage
-  const sections: DebriefSection[] = validated.sections.map((s, idx) => ({
-    title: s.title,
-    content: s.content,
-    order: s.order ?? idx,
-  }));
+  const markdown = content.trim();
+  const sections = extractSectionsFromMarkdown(markdown);
 
   return {
     markdown,
@@ -287,51 +207,41 @@ export async function generateDebrief(
 }
 
 /**
- * Convert structured output to markdown
+ * Extract sections from Markdown for DB storage.
+ * We treat each `## Heading` as a section.
  */
-function generateMarkdown(output: DebriefOutput): string {
-  const lines: string[] = [];
+function extractSectionsFromMarkdown(markdown: string): DebriefSection[] {
+  const lines = markdown.split(/\r?\n/);
+  const sections: DebriefSection[] = [];
 
-  // Title
-  lines.push(`# ${output.title}`);
-  lines.push('');
+  let currentTitle: string | null = null;
+  let currentLines: string[] = [];
 
-  // Summary
-  lines.push('## Summary');
-  lines.push(output.summary);
-  lines.push('');
-
-  // Participants (if any)
-  if (output.participants && output.participants.length > 0) {
-    lines.push('## Participants');
-    output.participants.forEach((p) => lines.push(`- ${p}`));
-    lines.push('');
-  }
-
-  // Main sections
-  for (const section of output.sections.sort((a, b) => a.order - b.order)) {
-    lines.push(`## ${section.title}`);
-    lines.push(section.content);
-    lines.push('');
-  }
-
-  // Key Decisions (if any)
-  if (output.keyDecisions && output.keyDecisions.length > 0) {
-    lines.push('## Key Decisions');
-    output.keyDecisions.forEach((d) => lines.push(`- ${d}`));
-    lines.push('');
-  }
-
-  // Action Items
-  if (output.actionItems.length > 0) {
-    lines.push('## Action Items');
-    output.actionItems.forEach((item) => {
-      const priority = item.priority === 'high' ? '🔴' : item.priority === 'medium' ? '🟡' : '🟢';
-      const assignee = item.assignee ? ` (${item.assignee})` : '';
-      lines.push(`- ${priority} ${item.description}${assignee}`);
+  const flush = () => {
+    if (!currentTitle) return;
+    sections.push({
+      title: currentTitle,
+      content: currentLines.join('\n').trim(),
+      order: sections.length,
     });
-    lines.push('');
+    currentTitle = null;
+    currentLines = [];
+  };
+
+  for (const line of lines) {
+    const match = line.match(/^##\s+(.+)\s*$/);
+    if (match) {
+      flush();
+      currentTitle = match[1].trim();
+      continue;
+    }
+    if (currentTitle) currentLines.push(line);
+  }
+  flush();
+
+  if (sections.length === 0) {
+    return [{ title: 'Debrief', content: markdown.trim(), order: 0 }];
   }
 
-  return lines.join('\n');
+  return sections;
 }

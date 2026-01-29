@@ -104,6 +104,37 @@ docker run -p 9000:9000 -p 9001:9001 \
   minio/minio server /data --console-address ":9001"
 ```
 
+### S3 CORS (required for browser uploads)
+
+Because the browser uploads audio **directly** to S3 using a presigned **PUT** URL, your bucket must allow cross‑origin `PUT` from your web app origin.
+
+- **Important**: The upload request must include a `Content-Type` header that matches the `mimeType` you sent to `POST /api/recordings` (the presigned URL enforces it).
+
+**AWS S3 bucket CORS example**
+
+Use this for development (localhost) and production (replace with your deployed web origin):
+
+```json
+[
+  {
+    "AllowedOrigins": ["http://localhost:3000", "https://your-web-domain.com"],
+    "AllowedMethods": ["PUT", "GET", "HEAD"],
+    "AllowedHeaders": ["*"],
+    "ExposeHeaders": ["ETag"],
+    "MaxAgeSeconds": 3000
+  }
+]
+```
+
+**S3‑compatible storage (R2/MinIO)**
+
+Configure CORS on your bucket/service with the same intent:
+
+- Allow origins: your dev/prod web origins
+- Allow methods: `PUT`, `GET`, `HEAD`
+- Allow headers: `Content-Type` (or `*`)
+- Expose headers: `ETag` (optional, but useful)
+
 ### 5. Set up environment variables
 
 Create `.env` in `apps/api/`:
@@ -141,6 +172,10 @@ RATE_LIMIT_WINDOW_MS=60000
 
 # Upload Limits
 MAX_UPLOAD_SIZE_MB=500
+
+# Optional: enable server-side ffmpeg transcoding for MediaRecorder formats (webm/ogg)
+# If enabled, the worker will download + convert to WAV 16k mono before transcription.
+ENABLE_FFMPEG_TRANSCODE=false
 
 # Error Tracking (optional)
 # SENTRY_DSN=https://your-dsn@sentry.io/project
@@ -228,6 +263,7 @@ pnpm dev  # Runs web + api (start worker separately)
 
 - **Rate Limiting**: Per-user rate limiting with Redis backend (configurable via `RATE_LIMIT_MAX`)
 - **Upload Size**: Configurable max upload size (default 500MB via `MAX_UPLOAD_SIZE_MB`)
+- **Optional Transcoding**: If `ENABLE_FFMPEG_TRANSCODE=true`, the worker will transcode `audio/webm` / `audio/ogg` uploads to WAV (16kHz mono) via ffmpeg before transcription.
 - **Env Validation**: Zod-validated environment configuration with fail-fast startup
 - **Error Tracking**: Sentry integration for production error monitoring
 - **Observability**: OpenTelemetry instrumentation (optional, enable with `OTEL_ENABLED=true`)
@@ -331,3 +367,27 @@ Recording Status Flow:
 ## License
 
 Private - All rights reserved
+
+## ffmpeg (optional, recommended for consistent transcription)
+
+If you enable `ENABLE_FFMPEG_TRANSCODE=true`, **ffmpeg must be installed** and available on `PATH` for the **worker** process.
+
+### Install locally (macOS)
+
+```bash
+brew install ffmpeg
+```
+
+### Install locally (Ubuntu/Debian)
+
+```bash
+sudo apt-get update && sudo apt-get install -y ffmpeg
+```
+
+### Docker notes
+
+If you containerize `apps/api` workers, ensure ffmpeg is installed in the worker image (example for Debian-based images):
+
+```bash
+apt-get update && apt-get install -y ffmpeg
+```

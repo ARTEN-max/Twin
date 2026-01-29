@@ -10,6 +10,8 @@ import { getPresignedDownloadUrl } from '../lib/storage.js';
 import { transcribe } from '../lib/ai/index.js';
 import { db } from '../lib/db.js';
 import { transcriptionQueue, debriefQueue } from './queues.js';
+import { getEnv } from '../lib/env.js';
+import { withTempTranscodeToWav16kMono } from '../lib/audio/ffmpeg.js';
 
 // Re-export queue for convenience
 export { transcriptionQueue };
@@ -43,21 +45,37 @@ export function startTranscriptionWorker(): Worker<TranscriptionJobData, Transcr
         const { downloadUrl } = await getPresignedDownloadUrl(objectKey);
         await job.updateProgress(20);
 
-        // Step 3: Transcribe audio (provider handles download internally if using URL)
-        // For better performance with large files, pass the URL directly
+        // Step 3: Transcribe audio
+        // Default: pass URL to provider for performance.
+        // Optional: if ENABLE_FFMPEG_TRANSCODE=true and the input is webm/ogg (common MediaRecorder formats),
+        // download + transcode to WAV 16k mono server-side to avoid provider format issues.
+        const env = getEnv();
+        const normalizedMime = mimeType.split(';')[0]?.trim().toLowerCase();
+
         log('Transcribing audio');
-        const transcriptionResult = await transcribe(
-          { type: 'url', url: downloadUrl, mimeType },
-          { punctuate: true, diarize: false }
-        );
+        const transcriptionResult =
+          env.ENABLE_FFMPEG_TRANSCODE && (normalizedMime === 'audio/webm' || normalizedMime === 'audio/ogg')
+            ? await withTempTranscodeToWav16kMono(
+                { url: downloadUrl, inputMimeType: normalizedMime },
+                async ({ buffer, mimeType: outMime }) =>
+                  transcribe({ type: 'buffer', data: buffer, mimeType: outMime }, { punctuate: true, diarize: false })
+              )
+            : await transcribe({ type: 'url', url: downloadUrl, mimeType }, { punctuate: true, diarize: false });
+
         log(`Transcription complete: ${transcriptionResult.text.length} chars, ${transcriptionResult.segments?.length ?? 0} segments`);
         await job.updateProgress(70);
 
-        // Step 4: Save transcript to database
+        // Step 4: Save transcript to database (upsert so retries overwrite old/mock transcripts)
         log('Saving transcript to database');
-        const transcript = await db.transcript.create({
-          data: {
+        const transcript = await db.transcript.upsert({
+          where: { recordingId },
+          create: {
             recordingId,
+            text: transcriptionResult.text,
+            segments: transcriptionResult.segments as unknown as Parameters<typeof db.transcript.create>[0]['data']['segments'],
+            language: transcriptionResult.language,
+          },
+          update: {
             text: transcriptionResult.text,
             segments: transcriptionResult.segments as unknown as Parameters<typeof db.transcript.create>[0]['data']['segments'],
             language: transcriptionResult.language,
@@ -214,4 +232,41 @@ export async function enqueueTranscriptionJob(
     }
   );
   return job.id!;
+}
+
+/**
+ * Retry transcription for an existing recording.
+ * Creates a new TRANSCRIBE job record and enqueues it.
+ */
+export async function retryTranscriptionJob(recordingId: string): Promise<string | null> {
+  const recording = await db.recording.findUnique({
+    where: { id: recordingId },
+  });
+
+  if (!recording?.objectKey) return null;
+
+  // Flip status back to processing while we retry
+  await db.recording.update({
+    where: { id: recordingId },
+    data: { status: 'processing' },
+  });
+
+  // Create a new transcription job in DB
+  const dbJob = await db.job.create({
+    data: {
+      recordingId,
+      type: 'TRANSCRIBE',
+      status: 'pending',
+    },
+  });
+
+  const jobData: TranscriptionJobData = {
+    recordingId,
+    jobId: dbJob.id,
+    objectKey: recording.objectKey,
+    mimeType: recording.mimeType || 'audio/mpeg',
+    userId: recording.userId,
+  };
+
+  return enqueueTranscriptionJob(jobData);
 }

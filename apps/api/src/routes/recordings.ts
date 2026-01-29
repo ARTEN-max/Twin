@@ -16,11 +16,10 @@ import {
   getPresignedDownloadUrl,
   objectExists,
   isAllowedMimeType,
+  getExtensionFromMimeType,
 } from '../lib/storage.js';
-import { getEnv } from '../lib/env.js';
 import { enqueueTranscriptionJob, type TranscriptionJobData } from '../queues/index.js';
 import { uploadRateLimit } from '../plugins/rate-limit.js';
-import { formatBytes } from '../plugins/upload-guard.js';
 
 // ============================================
 // Request Schemas
@@ -29,9 +28,7 @@ import { formatBytes } from '../plugins/upload-guard.js';
 const createRecordingSchema = z.object({
   title: z.string().min(1).max(255),
   mode: RecordingMode.default('general'),
-  filename: z.string().min(1).max(255),
   mimeType: z.string().min(1),
-  fileSize: z.number().int().positive(), // Size validated against env config
 });
 
 const listRecordingsQuerySchema = z.object({
@@ -74,9 +71,7 @@ export const recordingsRoutes: FastifyPluginAsync = async (app) => {
       });
     }
 
-    const { title, mode, filename, mimeType, fileSize } = parseResult.data;
-    const env = getEnv();
-    const maxSize = env.MAX_UPLOAD_SIZE_MB * 1024 * 1024;
+    const { title, mode, mimeType } = parseResult.data;
 
     // Validate MIME type
     if (!isAllowedMimeType(mimeType)) {
@@ -86,14 +81,13 @@ export const recordingsRoutes: FastifyPluginAsync = async (app) => {
       });
     }
 
-    // Validate file size
-    if (fileSize > maxSize) {
-      return reply.status(413).send({
-        error: 'Payload Too Large',
-        message: `File size (${formatBytes(fileSize)}) exceeds maximum allowed size of ${env.MAX_UPLOAD_SIZE_MB}MB`,
-        maxSize,
-      });
-    }
+    const ext = getExtensionFromMimeType(mimeType);
+    const safeTitle = title
+      .trim()
+      .replace(/[^a-zA-Z0-9._ -]/g, '')
+      .replace(/\s+/g, '_')
+      .slice(0, 80);
+    const filename = `${safeTitle || 'recording'}.${ext}`;
 
     try {
       // 1. Create recording in pending status
@@ -103,16 +97,14 @@ export const recordingsRoutes: FastifyPluginAsync = async (app) => {
         mode,
         originalFilename: filename,
         mimeType,
-        fileSize,
       });
 
       // 2. Generate presigned upload URL
       const { uploadUrl, objectKey, expiresIn } = await getPresignedUploadUrl(
         userId,
         recording.id,
-        filename,
         mimeType,
-        fileSize
+        filename
       );
 
       // 3. Save object key to recording
@@ -483,6 +475,66 @@ export const recordingsRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(500).send({
         error: 'Internal Server Error',
         message: 'Failed to retry debrief',
+      });
+    }
+  });
+
+  /**
+   * POST /recordings/:id/retry-transcription
+   * Retry transcription (and subsequently debrief) for a recording.
+   */
+  app.post<{
+    Params: { id: string };
+  }>('/recordings/:id/retry-transcription', async (request, reply) => {
+    const userId = request.headers['x-user-id'] as string;
+    if (!userId) {
+      return reply.status(401).send({
+        error: 'Unauthorized',
+        message: 'Missing x-user-id header',
+      });
+    }
+
+    const { id } = request.params;
+
+    try {
+      const recording = await getRecordingByUser(id, userId);
+      if (!recording) {
+        return reply.status(404).send({
+          error: 'Not Found',
+          message: 'Recording not found',
+        });
+      }
+
+      if (!recording.objectKey) {
+        return reply.status(400).send({
+          error: 'No File',
+          message: 'Recording has no associated file',
+        });
+      }
+
+      const { retryTranscriptionJob } = await import('../queues/index.js');
+      const queueJobId = await retryTranscriptionJob(id);
+
+      if (!queueJobId) {
+        return reply.status(400).send({
+          error: 'Retry Failed',
+          message: 'Failed to enqueue transcription job',
+        });
+      }
+
+      return reply.status(200).send({
+        data: {
+          recordingId: id,
+          queueJobId,
+          message: 'Transcription job requeued',
+        },
+        success: true,
+      });
+    } catch (error) {
+      request.log.error(error, 'Failed to retry transcription');
+      return reply.status(500).send({
+        error: 'Internal Server Error',
+        message: 'Failed to retry transcription',
       });
     }
   });

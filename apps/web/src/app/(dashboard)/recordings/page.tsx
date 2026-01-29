@@ -70,7 +70,7 @@ function StatusBadge({ status }: { status: Recording['status'] }) {
         config.color
       )}
     >
-      <Icon className={cn('h-3.5 w-3.5', config.animate && 'animate-spin')} />
+      <Icon className={cn('h-3.5 w-3.5', 'animate' in config && config.animate && 'animate-spin')} />
       {config.label}
     </span>
   );
