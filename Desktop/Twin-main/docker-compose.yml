@@ -1,0 +1,160 @@
+# ===========================================
+# Komuchi / Debrief - Docker Compose
+# ===========================================
+#
+# Quick start:
+#   cp .env.example .env
+#   docker compose up
+#
+# Run just infrastructure (for local dev with pnpm dev):
+#   docker compose up redis minio minio-init
+#
+# Rebuild after code changes:
+#   docker compose up --build
+#
+# ===========================================
+
+services:
+  # ---- Infrastructure ----
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  minio:
+    image: minio/minio
+    ports:
+      - '9000:9000' # S3 API
+      - '9001:9001' # Web console
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ['CMD', 'mc', 'ready', 'local']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Creates the S3 bucket on first run
+  minio-init:
+    image: minio/mc
+    depends_on:
+      minio:
+        condition: service_started
+    restart: 'no'
+    entrypoint: >
+      /bin/sh -c "
+      sleep 3;
+      mc alias set local http://minio:9000 minioadmin minioadmin;
+      mc mb local/komuchi --ignore-existing;
+      echo 'Bucket ready';
+      exit 0;
+      "
+
+  # Diarization Service (Python FastAPI)
+  diarization:
+    build:
+      context: ./services/diarization
+      dockerfile: Dockerfile
+    ports:
+      - '8001:8001'
+    environment:
+      COQUI_MODEL_PATH: ${COQUI_MODEL_PATH:-}
+    volumes:
+      - diarization_models:/root/.local/share/tts
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:8001/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s  # Allow time for model download on first run
+
+  # ---- Application ----
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    ports:
+      - '3001:3001'
+    environment:
+      NODE_ENV: development
+      API_PORT: 3001
+      API_HOST: 0.0.0.0
+      DATABASE_URL: file:/data/dev.db
+      REDIS_URL: redis://redis:6379
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: komuchi
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY_ID: minioadmin
+      S3_SECRET_ACCESS_KEY: minioadmin
+      CORS_ORIGIN: http://localhost:3000,http://localhost:5174
+      TRANSCRIPTION_PROVIDER: ${TRANSCRIPTION_PROVIDER:-mock}
+      DEBRIEF_PROVIDER: ${DEBRIEF_PROVIDER:-mock}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      DIARIZATION_SERVICE_URL: http://diarization:8001
+    volumes:
+      - api_data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      diarization:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ['node', 'apps/api/dist/worker.js']
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: file:/data/dev.db
+      REDIS_URL: redis://redis:6379
+      S3_ENDPOINT: http://minio:9000
+      S3_BUCKET: komuchi
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY_ID: minioadmin
+      S3_SECRET_ACCESS_KEY: minioadmin
+      TRANSCRIPTION_PROVIDER: ${TRANSCRIPTION_PROVIDER:-mock}
+      DEBRIEF_PROVIDER: ${DEBRIEF_PROVIDER:-mock}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      DIARIZATION_SERVICE_URL: http://diarization:8001
+    volumes:
+      - api_data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+      diarization:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - '3000:3000'
+    environment:
+      # Inside Docker, the web container reaches the API via service name
+      API_URL: http://api:3001
+    depends_on:
+      - api
+
+volumes:
+  redis_data:
+  minio_data:
+  api_data:

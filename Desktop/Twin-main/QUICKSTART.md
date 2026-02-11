@@ -29,6 +29,7 @@ The app will be available at:
 - **Web App**: http://localhost:3000
 - **API**: http://localhost:3001
 - **MinIO Console**: http://localhost:9001 (login: `minioadmin` / `minioadmin`)
+- **Diarization Service**: http://localhost:8001
 
 ### What's Running?
 
@@ -37,8 +38,11 @@ The app will be available at:
 - ✅ Worker process (job queue)
 - ✅ Redis (job queue backend)
 - ✅ MinIO (S3-compatible storage)
+- ✅ Diarization service (Python FastAPI for speaker identification)
 
 All services use **mock AI providers** by default, so no API keys needed!
+
+**Note**: The diarization service will download a ~2GB model on first run (takes a few minutes). This is cached for future runs.
 
 ---
 
@@ -65,8 +69,8 @@ pnpm install
 cp apps/api/.env.example apps/api/.env
 # Edit apps/api/.env if needed (defaults work for local dev)
 
-# 3. Start Redis and MinIO (using Docker)
-docker compose up redis minio minio-init -d
+# 3. Start infrastructure services (using Docker)
+docker compose up redis minio minio-init diarization -d
 
 # 4. Set up database
 pnpm --filter=@komuchi/api db:generate

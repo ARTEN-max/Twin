@@ -85,17 +85,20 @@ cp apps/api/.env.example apps/api/.env
 docker compose up --build
 ```
 
-This starts five services:
+This starts six services:
 
-| Service     | URL                   | Description                                                |
-| ----------- | --------------------- | ---------------------------------------------------------- |
-| **Web App** | http://localhost:3000 | Next.js frontend                                           |
-| **API**     | http://localhost:3001 | Fastify backend                                            |
-| **Worker**  | _(background)_        | BullMQ job processor                                       |
-| **Redis**   | localhost:6379        | Job queue                                                  |
-| **MinIO**   | http://localhost:9001 | S3-compatible storage (login: `minioadmin` / `minioadmin`) |
+| Service         | URL                   | Description                                                |
+| --------------- | --------------------- | ---------------------------------------------------------- |
+| **Web App**     | http://localhost:3000 | Next.js frontend                                           |
+| **API**         | http://localhost:3001 | Fastify backend                                            |
+| **Worker**      | _(background)_        | BullMQ job processor                                       |
+| **Redis**       | localhost:6379        | Job queue                                                  |
+| **MinIO**       | http://localhost:9001 | S3-compatible storage (login: `minioadmin` / `minioadmin`) |
+| **Diarization** | http://localhost:8001 | Python FastAPI service for speaker identification          |
 
 Database migrations run automatically on startup. The app uses mock AI providers by default so you don't need any API keys to get started.
+
+**Note**: The diarization service will download a ~2GB model on first run (takes 2-5 minutes depending on your internet speed). This is cached in a Docker volume for future runs.
 
 ### Stopping
 
