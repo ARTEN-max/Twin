@@ -6,7 +6,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -57,6 +57,7 @@ model User {
   hasVoiceProfile   Boolean       @default(false) @map("has_voice_profile")
   consentAcceptedAt DateTime?     @map("consent_accepted_at")
   consentRevokedAt  DateTime?     @map("consent_revoked_at")
+  pushToken         String?       @map("push_token") // Expo push notification token
   createdAt         DateTime      @default(now()) @map("created_at")
   updatedAt         DateTime      @updatedAt @map("updated_at")
   recordings        Recording[]
