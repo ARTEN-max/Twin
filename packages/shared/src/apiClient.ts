@@ -113,19 +113,37 @@ async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     let errorMessage = `Request failed with status ${response.status}`;
     let errorCode: string | undefined;
+    let errorBody: string | undefined;
 
     if (isJson) {
       try {
         const errorData = (await response.json()) as ApiError | { error?: string; message?: string };
         errorMessage = errorData.message || errorData.error || errorMessage;
         errorCode = 'error' in errorData ? errorData.error : undefined;
+        errorBody = JSON.stringify(errorData);
       } catch {
         // Fallback to status text
         errorMessage = response.statusText || errorMessage;
       }
     } else {
-      errorMessage = response.statusText || errorMessage;
+      try {
+        errorBody = await response.clone().text();
+        errorMessage = response.statusText || errorMessage;
+      } catch {
+        errorMessage = response.statusText || errorMessage;
+      }
     }
+
+    // Log detailed error for debugging
+    console.error('[API Client] Request failed:', {
+      status: response.status,
+      statusText: response.statusText,
+      url: response.url,
+      errorMessage,
+      errorCode,
+      errorBody: errorBody?.substring(0, 500), // Limit to first 500 chars
+      headers: Object.fromEntries(response.headers.entries()),
+    });
 
     throw new ApiClientError(errorMessage, response.status, errorCode);
   }
