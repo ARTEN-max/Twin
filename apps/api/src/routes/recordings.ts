@@ -373,7 +373,10 @@ export const recordingsRoutes: FastifyPluginAsync = async (app) => {
           });
         }
 
-        // 5. Generate object key and upload to S3
+        // 5. Ensure bucket exists, then generate object key and upload to S3
+        const { ensureBucketExists } = await import('../lib/storage.js');
+        await ensureBucketExists();
+        
         const objectKey = generateObjectKey(userId, id, filename);
         await uploadObject(objectKey, buffer, mimeType, {
           'user-id': userId,
