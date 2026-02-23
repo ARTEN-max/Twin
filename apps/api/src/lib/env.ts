@@ -107,7 +107,13 @@ export function validateEnv(): Env {
     return validatedEnv;
   }
 
-  const result = envSchema.safeParse(process.env);
+  // Railway sets PORT dynamically — override API_PORT so the server binds correctly
+  const envInput = { ...process.env };
+  if (envInput.PORT) {
+    envInput.API_PORT = envInput.PORT;
+  }
+
+  const result = envSchema.safeParse(envInput);
 
   if (!result.success) {
     console.error('❌ Environment validation failed:');
