@@ -256,8 +256,26 @@ export default function NewRecordingScreen({
         durationTimeoutRef.current = null;
       }
 
-      await recording.stopAndUnloadAsync();
-      const uri = recording.getURI();
+      let uri: string | null = null;
+      
+      // Try to stop and unload, but handle "already unloaded" error gracefully
+      try {
+        await recording.stopAndUnloadAsync();
+        uri = recording.getURI();
+      } catch (err) {
+        // If error is about already unloaded, try to get URI anyway
+        if (err instanceof Error && err.message.includes('already been unloaded')) {
+          console.log('Recording already unloaded, getting URI directly');
+          uri = recording.getURI();
+        } else {
+          // For other errors, try to get URI before throwing
+          uri = recording.getURI();
+          if (!uri) {
+            throw err;
+          }
+        }
+      }
+
       if (!uri) {
         throw new Error('No recording URI returned');
       }
@@ -425,8 +443,8 @@ export default function NewRecordingScreen({
     setUploadProgress('Processing your recording...');
 
     let attempts = 0;
-    const maxAttempts = 60; // 5 minutes max
-    const baseDelay = 1000;
+    const maxAttempts = 120; // 10 minutes max (increased from 5)
+    const baseDelay = 2000; // Start with 2 seconds
 
     while (attempts < maxAttempts) {
       try {
@@ -453,23 +471,29 @@ export default function NewRecordingScreen({
           throw new Error(errorMsg);
         }
 
-        // Exponential backoff
-        const delay = Math.min(baseDelay * Math.pow(2, attempts), 30000);
+        // Exponential backoff with max 30 seconds
+        const delay = Math.min(baseDelay * Math.pow(2, Math.floor(attempts / 5)), 30000);
         await new Promise((resolve) => setTimeout(resolve, delay));
         attempts++;
       } catch (err) {
         console.error('Error polling:', err);
         if (err instanceof ApiClientError && err.statusCode === 404) {
-          const delay = Math.min(baseDelay * Math.pow(2, attempts), 30000);
+          // Recording not found yet, keep polling
+          const delay = Math.min(baseDelay * Math.pow(2, Math.floor(attempts / 5)), 30000);
           await new Promise((resolve) => setTimeout(resolve, delay));
           attempts++;
           continue;
         }
+        // For other errors, throw to show error state
         throw err;
       }
     }
 
-    throw new Error('Processing timeout: recording did not complete in time');
+    // Timeout - but don't throw error, just show a message and allow navigation
+    setError('Processing is taking longer than expected. You can check the recording status later.');
+    setState('error');
+    // Still set recordingId so user can navigate to detail screen
+    setRecordingId(id);
   };
 
   const handleRetry = async () => {
