@@ -22,28 +22,47 @@ const getBaseUrl = (): string => {
   // Expo bakes EXPO_PUBLIC_ variables from app.json into process.env at build time
   // This is the recommended way and avoids module resolution issues
   if (typeof process !== 'undefined') {
-    // @ts-ignore - process.env may not be typed in all environments
+    // @ts-expect-error - process.env may not be typed in all environments
     if (process.env?.EXPO_PUBLIC_API_BASE_URL) {
-      // @ts-ignore
-      return process.env.EXPO_PUBLIC_API_BASE_URL;
+      const url = process.env.EXPO_PUBLIC_API_BASE_URL;
+      if (typeof console !== 'undefined' && console.log) {
+        // eslint-disable-next-line no-console
+        console.log('[API Client] Using API URL from process.env:', url);
+      }
+      // @ts-expect-error
+      return url;
     }
-    // @ts-ignore
+    // @ts-expect-error
     if (process.env?.NEXT_PUBLIC_API_URL) {
-      // @ts-ignore
-      return process.env.NEXT_PUBLIC_API_URL;
+      const url = process.env.NEXT_PUBLIC_API_URL;
+      if (typeof console !== 'undefined' && console.log) {
+        // eslint-disable-next-line no-console
+        console.log('[API Client] Using API URL from NEXT_PUBLIC_API_URL:', url);
+      }
+      // @ts-expect-error
+      return url;
     }
   }
   
   // For browser environments
-  if (typeof globalThis !== 'undefined' && 'window' in globalThis && (globalThis as any).window) {
-    const win = (globalThis as any).window;
-    if (win.__API_BASE_URL__) {
+  if (typeof globalThis !== 'undefined' && 'window' in globalThis && (globalThis as { window?: unknown }).window) {
+    const win = (globalThis as { window?: { __API_BASE_URL__?: string } }).window;
+    if (win?.__API_BASE_URL__) {
+      if (typeof console !== 'undefined' && console.log) {
+        // eslint-disable-next-line no-console
+        console.log('[API Client] Using API URL from window.__API_BASE_URL__:', win.__API_BASE_URL__);
+      }
       return win.__API_BASE_URL__;
     }
   }
   
-  // Default fallback - use IP for iOS simulator compatibility
-  return 'http://172.20.10.10:3001';
+  // Default fallback - use Railway URL for production
+  const fallbackUrl = 'https://twin-production-a0e4.up.railway.app';
+  if (typeof console !== 'undefined' && console.warn) {
+    // eslint-disable-next-line no-console
+    console.warn('[API Client] No API URL found in env, using fallback:', fallbackUrl);
+  }
+  return fallbackUrl;
 };
 
 // ============================================
@@ -167,12 +186,29 @@ async function apiRequest<T>(
     }
   }
 
-  const response = await fetch(url, {
-    ...options,
-    headers,
-  });
+  // Add timeout to prevent long hangs (10 seconds)
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-  return handleResponse<T>(response);
+  try {
+    const response = await fetch(url, {
+      ...options,
+      headers,
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    return handleResponse<T>(response);
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      throw new ApiClientError(
+        'Request timed out. Please check your network connection.',
+        0,
+        'TIMEOUT'
+      );
+    }
+    throw error;
+  }
 }
 
 // ============================================
@@ -239,6 +275,14 @@ export async function uploadRecordingFile(
   const baseUrl = getBaseUrl();
   const url = `${baseUrl}/api/recordings/${recordingId}/upload`;
 
+  console.log('[API Client] Upload request:', {
+    baseUrl,
+    url,
+    recordingId,
+    contentType,
+    fileSize: fileData.byteLength || (fileData as Uint8Array).length,
+  });
+
   // Build headers – include auth token if available
   const uploadHeaders: Record<string, string> = {
     'x-user-id': userId,
@@ -251,13 +295,38 @@ export async function uploadRecordingFile(
     } catch { /* continue without token */ }
   }
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: uploadHeaders,
-    body: fileData,
-  });
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout for uploads
 
-  return handleResponse<{ success: boolean; message: string }>(response);
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: uploadHeaders,
+      body: fileData,
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+    return handleResponse<{ success: boolean; message: string }>(response);
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new ApiClientError('Upload request timed out after 60 seconds', 408);
+    }
+    if (error instanceof Error && error.message.includes('Network request failed')) {
+      console.error('[API Client] Network error details:', {
+        url,
+        baseUrl,
+        error: error.message,
+        stack: error.stack,
+      });
+      throw new ApiClientError(
+        `Cannot reach API server at ${baseUrl}. Check your internet connection and ensure the API is running.`,
+        0,
+        'NETWORK_ERROR'
+      );
+    }
+    throw error;
+  }
 }
 
 /**
@@ -897,5 +966,18 @@ export async function deleteRecordingApi(
   return apiRequest<{ ok: boolean }>(`/api/recordings/${recordingId}`, {
     method: 'DELETE',
     headers: { 'x-user-id': userId },
+  });
+}
+
+/**
+ * Register push notification token
+ */
+export async function registerPushToken(
+  userId: string,
+  token: string
+): Promise<{ success: boolean; message: string }> {
+  return apiRequest<{ success: boolean; message: string }>('/api/me/push-token', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
   });
 }
