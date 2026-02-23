@@ -17,7 +17,7 @@ function requireUser(request: { firebaseUser?: FirebaseUser | null }): FirebaseU
   return user;
 }
 
-const DIARIZATION_SERVICE_URL = process.env.DIARIZATION_SERVICE_URL || 'http://localhost:8001';
+const DIARIZATION_SERVICE_URL = process.env.DIARIZATION_SERVICE_URL || '';
 
 // ============================================
 // Routes
@@ -47,6 +47,10 @@ export const voiceProfileRoutes: FastifyPluginAsync = async (fastify) => {
         // TODO: Add actual duration check if needed
 
         // Extract speaker embedding using diarization service
+        if (!DIARIZATION_SERVICE_URL) {
+          throw new Error('Voice profile enrollment is not available. The diarization service is not configured. Please set DIARIZATION_SERVICE_URL environment variable.');
+        }
+
         console.log(`👤 Extracting voice embedding for user ${userId}`);
 
         const form = new FormData();

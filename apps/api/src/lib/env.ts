@@ -59,6 +59,9 @@ const envSchema = z.object({
   WHISPER_MODEL_PATH: z.string().optional(),
   WHISPER_BINARY_PATH: z.string().optional(),
 
+  // Diarization Service (optional - required for voice profile enrollment)
+  DIARIZATION_SERVICE_URL: z.string().url().optional(),
+
   // Rate Limiting
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60000),
