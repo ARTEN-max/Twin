@@ -301,23 +301,39 @@ export async function uploadRecordingFile(
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout for uploads
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: uploadHeaders,
-      body: fileData,
-      signal: controller.signal,
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: uploadHeaders,
+        body: fileData,
+        signal: controller.signal,
+      });
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+      console.error('[API Client] Fetch failed (network error):', {
+        url,
+        error: fetchError instanceof Error ? fetchError.message : String(fetchError),
+        stack: fetchError instanceof Error ? fetchError.stack : undefined,
+      });
+      throw fetchError;
+    }
 
     clearTimeout(timeoutId);
     
     // Log response details for debugging
     if (!response.ok) {
-      const errorText = await response.text().catch(() => 'Could not read error response');
+      let errorText: string;
+      try {
+        errorText = await response.clone().text();
+      } catch {
+        errorText = 'Could not read error response';
+      }
       console.error('[API Client] Upload failed:', {
         status: response.status,
         statusText: response.statusText,
         headers: Object.fromEntries(response.headers.entries()),
-        errorBody: errorText,
+        errorBody: errorText.substring(0, 500), // Limit to first 500 chars
       });
     }
     
