@@ -191,6 +191,39 @@ export async function getPresignedDownloadUrl(objectKey: string): Promise<Presig
 }
 
 /**
+ * Ensure the S3 bucket exists, create it if it doesn't
+ */
+export async function ensureBucketExists(): Promise<void> {
+  const client = getS3Client();
+  const bucket = getBucket();
+
+  try {
+    // Check if bucket exists
+    await client.send(new HeadBucketCommand({ Bucket: bucket }));
+    // Bucket exists, nothing to do
+    return;
+  } catch (error: unknown) {
+    // Bucket doesn't exist or we don't have access, try to create it
+    if (error && typeof error === 'object' && 'name' in error && error.name === 'NotFound') {
+      try {
+        await client.send(
+          new CreateBucketCommand({
+            Bucket: bucket,
+          })
+        );
+        console.log(`✅ Created S3 bucket: ${bucket}`);
+      } catch (createError) {
+        console.error(`❌ Failed to create bucket ${bucket}:`, createError);
+        throw createError;
+      }
+    } else {
+      // Re-throw if it's a different error (e.g., permission denied)
+      throw error;
+    }
+  }
+}
+
+/**
  * Check if an object exists in S3
  */
 export async function objectExists(objectKey: string): Promise<boolean> {
