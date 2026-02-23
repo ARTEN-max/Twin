@@ -319,21 +319,17 @@ export async function uploadRecordingFile(
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout for uploads
 
-    // Convert ArrayBuffer/Uint8Array to Blob for React Native compatibility
-    let body: Blob | ArrayBuffer | Uint8Array;
-    if (fileData instanceof ArrayBuffer) {
-      body = new Blob([fileData], { type: contentType });
-    } else if (fileData instanceof Uint8Array) {
-      body = new Blob([fileData], { type: contentType });
-    } else {
-      body = fileData;
-    }
+    // React Native fetch works best with Uint8Array directly
+    // Don't convert to Blob as it may not be available in all React Native environments
+    const body = fileData instanceof Uint8Array ? fileData : new Uint8Array(fileData);
 
     console.log('[API Client] Starting upload fetch:', {
       url,
       contentType,
-      bodyType: body instanceof Blob ? 'Blob' : typeof body,
-      bodySize: body instanceof Blob ? body.size : (fileData.byteLength || (fileData as Uint8Array).length),
+      bodyType: body instanceof Uint8Array ? 'Uint8Array' : typeof body,
+      bodySize: body.length,
+      hasAuth: !!uploadHeaders['Authorization'],
+      userId: userId.substring(0, 8) + '...',
     });
 
     let response: Response;
