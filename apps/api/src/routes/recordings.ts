@@ -413,10 +413,16 @@ export const recordingsRoutes: FastifyPluginAsync = async (app) => {
           success: true,
         });
       } catch (error) {
-        request.log.error(error, 'Failed to upload file');
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorStack = error instanceof Error ? error.stack : undefined;
+        request.log.error({ error, errorMessage, errorStack }, 'Failed to upload file');
+        
+        // Return more detailed error in development, generic in production
+        const isDev = process.env.NODE_ENV !== 'production';
         return reply.status(500).send({
           error: 'Internal Server Error',
-          message: 'Failed to upload file',
+          message: isDev ? errorMessage : 'Failed to upload file',
+          ...(isDev && errorStack ? { stack: errorStack } : {}),
         });
       }
     }
