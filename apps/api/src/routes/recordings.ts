@@ -21,6 +21,7 @@ import {
   uploadObject,
   generateObjectKey,
   deleteObject,
+  ensureBucketExists,
 } from '../lib/storage.js';
 import { enqueueTranscriptionJob, type TranscriptionJobData } from '../queues/index.js';
 import { uploadRateLimit } from '../plugins/rate-limit.js';
@@ -374,7 +375,6 @@ export const recordingsRoutes: FastifyPluginAsync = async (app) => {
         }
 
         // 5. Ensure bucket exists, then generate object key and upload to S3
-        const { ensureBucketExists } = await import('../lib/storage.js');
         await ensureBucketExists();
         
         const objectKey = generateObjectKey(userId, id, filename);
