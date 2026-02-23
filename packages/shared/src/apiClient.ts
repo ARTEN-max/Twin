@@ -311,9 +311,24 @@ export async function uploadRecordingFile(
   if (_tokenProvider) {
     try {
       const token = await _tokenProvider();
-      if (token) uploadHeaders['Authorization'] = `Bearer ${token}`;
-    } catch { /* continue without token */ }
+      if (token) {
+        uploadHeaders['Authorization'] = `Bearer ${token}`;
+        console.log('[API Client] Auth token included in upload headers');
+      } else {
+        console.warn('[API Client] No auth token available for upload');
+      }
+    } catch (error) {
+      console.warn('[API Client] Failed to get auth token:', error);
+    }
+  } else {
+    console.warn('[API Client] No token provider set for upload');
   }
+  
+  console.log('[API Client] Upload headers:', {
+    'x-user-id': userId.substring(0, 8) + '...',
+    'Content-Type': contentType,
+    'has-auth': !!uploadHeaders['Authorization'],
+  });
 
   try {
     const controller = new AbortController();
