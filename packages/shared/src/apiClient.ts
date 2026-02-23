@@ -319,19 +319,42 @@ export async function uploadRecordingFile(
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout for uploads
 
+    // Convert ArrayBuffer/Uint8Array to Blob for React Native compatibility
+    let body: Blob | ArrayBuffer | Uint8Array;
+    if (fileData instanceof ArrayBuffer) {
+      body = new Blob([fileData], { type: contentType });
+    } else if (fileData instanceof Uint8Array) {
+      body = new Blob([fileData], { type: contentType });
+    } else {
+      body = fileData;
+    }
+
+    console.log('[API Client] Starting upload fetch:', {
+      url,
+      contentType,
+      bodyType: body instanceof Blob ? 'Blob' : typeof body,
+      bodySize: body instanceof Blob ? body.size : (fileData.byteLength || (fileData as Uint8Array).length),
+    });
+
     let response: Response;
     try {
       response = await fetch(url, {
         method: 'POST',
         headers: uploadHeaders,
-        body: fileData,
+        body: body,
         signal: controller.signal,
+      });
+      console.log('[API Client] Upload fetch completed:', {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok,
       });
     } catch (fetchError) {
       clearTimeout(timeoutId);
       console.error('[API Client] Fetch failed (network error):', {
         url,
         error: fetchError instanceof Error ? fetchError.message : String(fetchError),
+        name: fetchError instanceof Error ? fetchError.name : undefined,
         stack: fetchError instanceof Error ? fetchError.stack : undefined,
       });
       throw fetchError;
