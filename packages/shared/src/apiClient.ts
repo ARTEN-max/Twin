@@ -22,31 +22,33 @@ const getBaseUrl = (): string => {
   // Expo bakes EXPO_PUBLIC_ variables from app.json into process.env at build time
   // This is the recommended way and avoids module resolution issues
   if (typeof process !== 'undefined') {
-    // @ts-expect-error - process.env may not be typed in all environments
+    // @ts-ignore - process.env may not be typed in all environments
     if (process.env?.EXPO_PUBLIC_API_BASE_URL) {
+      // @ts-ignore
       const url = process.env.EXPO_PUBLIC_API_BASE_URL;
       if (typeof console !== 'undefined' && console.log) {
         // eslint-disable-next-line no-console
         console.log('[API Client] Using API URL from process.env:', url);
       }
-      // @ts-expect-error
       return url;
     }
-    // @ts-expect-error
+    // @ts-ignore
     if (process.env?.NEXT_PUBLIC_API_URL) {
+      // @ts-ignore
       const url = process.env.NEXT_PUBLIC_API_URL;
       if (typeof console !== 'undefined' && console.log) {
         // eslint-disable-next-line no-console
         console.log('[API Client] Using API URL from NEXT_PUBLIC_API_URL:', url);
       }
-      // @ts-expect-error
       return url;
     }
   }
   
   // For browser environments
-  if (typeof globalThis !== 'undefined' && 'window' in globalThis && (globalThis as { window?: unknown }).window) {
-    const win = (globalThis as { window?: { __API_BASE_URL__?: string } }).window;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if (typeof globalThis !== 'undefined' && 'window' in globalThis && (globalThis as any).window) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const win = (globalThis as any).window;
     if (win?.__API_BASE_URL__) {
       if (typeof console !== 'undefined' && console.log) {
         // eslint-disable-next-line no-console
@@ -973,7 +975,7 @@ export async function deleteRecordingApi(
  * Register push notification token
  */
 export async function registerPushToken(
-  userId: string,
+  _userId: string,
   token: string
 ): Promise<{ success: boolean; message: string }> {
   return apiRequest<{ success: boolean; message: string }>('/api/me/push-token', {
