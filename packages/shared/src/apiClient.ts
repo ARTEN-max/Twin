@@ -309,6 +309,18 @@ export async function uploadRecordingFile(
     });
 
     clearTimeout(timeoutId);
+    
+    // Log response details for debugging
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => 'Could not read error response');
+      console.error('[API Client] Upload failed:', {
+        status: response.status,
+        statusText: response.statusText,
+        headers: Object.fromEntries(response.headers.entries()),
+        errorBody: errorText,
+      });
+    }
+    
     return handleResponse<{ success: boolean; message: string }>(response);
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
