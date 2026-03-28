@@ -24,7 +24,6 @@ import DataConsentScreen from './screens/DataConsentScreen';
 import ConsentScreen from './screens/ConsentScreen';
 import PrivacyPolicyScreen from './screens/PrivacyPolicyScreen';
 import TermsOfServiceScreen from './screens/TermsOfServiceScreen';
-import PipeTestScreen from './screens/PipeTest';
 
 import TabBar, { type Tab } from './components/TabBar';
 import type { RootStackParamList, AuthStackParamList } from './navigation/types';
@@ -188,8 +187,6 @@ function AppStack() {
             }}
           />
         );
-      case 'PipeTest':
-        return <PipeTestScreen />;
       default:
         return (
           <RecordingsScreen

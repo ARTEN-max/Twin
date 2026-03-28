@@ -1,3 +1,4 @@
+/* global process */
 /**
  * SignUpScreen
  *
@@ -15,10 +16,14 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Linking,
 } from 'react-native';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '../lib/firebase';
 import TwinLogo from '../components/TwinLogo';
+
+const PRIVACY_URL = process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL || '';
+const TERMS_URL = process.env.EXPO_PUBLIC_TERMS_URL || '';
 
 interface SignUpScreenProps {
   onGoToSignIn: () => void;
@@ -51,8 +56,8 @@ export default function SignUpScreen({ onGoToSignIn }: SignUpScreenProps) {
     try {
       await createUserWithEmailAndPassword(auth, email.trim(), password);
       // onAuthStateChanged in AuthProvider handles navigation
-    } catch (err: any) {
-      const code = err?.code as string | undefined;
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code;
       switch (code) {
         case 'auth/email-already-in-use':
           setError('An account with this email already exists.');
@@ -64,7 +69,9 @@ export default function SignUpScreen({ onGoToSignIn }: SignUpScreenProps) {
           setError('Password is too weak. Use at least 6 characters.');
           break;
         default:
-          setError(err?.message ?? 'Registration failed. Please try again.');
+          setError(
+            (err as { message?: string })?.message ?? 'Registration failed. Please try again.'
+          );
       }
     } finally {
       setLoading(false);
@@ -142,6 +149,18 @@ export default function SignUpScreen({ onGoToSignIn }: SignUpScreenProps) {
           </TouchableOpacity>
         </View>
 
+        <Text style={styles.legalNotice}>
+          By creating an account you agree to our{' '}
+          <Text style={styles.legalLink} onPress={() => Linking.openURL(TERMS_URL)}>
+            Terms of Service
+          </Text>{' '}
+          and{' '}
+          <Text style={styles.legalLink} onPress={() => Linking.openURL(PRIVACY_URL)}>
+            Privacy Policy
+          </Text>
+          .
+        </Text>
+
         <View style={styles.footer}>
           <Text style={styles.footerText}>Already have an account?</Text>
           <TouchableOpacity onPress={onGoToSignIn} disabled={loading}>
@@ -216,6 +235,16 @@ const styles = StyleSheet.create({
     color: '#000',
     fontSize: 17,
     fontWeight: '700',
+  },
+  legalNotice: {
+    color: '#666',
+    fontSize: 13,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 24,
+  },
+  legalLink: {
+    color: '#0ff',
   },
   footer: {
     flexDirection: 'row',

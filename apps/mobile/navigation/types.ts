@@ -1,6 +1,6 @@
 /**
  * Navigation Types
- * 
+ *
  * Type-safe navigation routes for the mobile app.
  */
 
@@ -23,5 +23,4 @@ export type RootStackParamList = {
   Consent: undefined;
   PrivacyPolicy: undefined;
   TermsOfService: undefined;
-  PipeTest: undefined;
 };
