@@ -179,6 +179,7 @@ function AppStack() {
             onDataConsent={() => navigate('DataConsent')}
             onPrivacyPolicy={() => navigate('PrivacyPolicy')}
             onTermsOfService={() => navigate('TermsOfService')}
+            onUpgrade={() => showPaywall()}
           />
         );
       case 'DataConsent':

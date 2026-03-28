@@ -1,6 +1,7 @@
+/* global fetch, Response, RequestInit, URLSearchParams, setTimeout, clearTimeout, AbortController, TextDecoder, Blob, FormData, File, console, process */
 /**
  * Shared API Client for Mobile and Web
- * 
+ *
  * Provides typed wrappers around fetch for the Komuchi API.
  * All endpoint strings are centralized here.
  */
@@ -22,28 +23,26 @@ const getBaseUrl = (): string => {
   // Expo bakes EXPO_PUBLIC_ variables from app.json into process.env at build time
   // This is the recommended way and avoids module resolution issues
   if (typeof process !== 'undefined') {
-    // @ts-ignore - process.env may not be typed in all environments
+    // @ts-expect-error - process.env not typed in this tsconfig
     if (process.env?.EXPO_PUBLIC_API_BASE_URL) {
-      // @ts-ignore
+      // @ts-expect-error - process.env not typed in this tsconfig
       const url = process.env.EXPO_PUBLIC_API_BASE_URL;
       if (typeof console !== 'undefined' && console.log) {
-        // eslint-disable-next-line no-console
         console.log('[API Client] Using API URL from process.env:', url);
       }
       return url;
     }
-    // @ts-ignore
+    // @ts-expect-error - process.env not typed in this tsconfig
     if (process.env?.NEXT_PUBLIC_API_URL) {
-      // @ts-ignore
+      // @ts-expect-error - process.env not typed in this tsconfig
       const url = process.env.NEXT_PUBLIC_API_URL;
       if (typeof console !== 'undefined' && console.log) {
-        // eslint-disable-next-line no-console
         console.log('[API Client] Using API URL from NEXT_PUBLIC_API_URL:', url);
       }
       return url;
     }
   }
-  
+
   // For browser environments
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   if (typeof globalThis !== 'undefined' && 'window' in globalThis && (globalThis as any).window) {
@@ -51,17 +50,18 @@ const getBaseUrl = (): string => {
     const win = (globalThis as any).window;
     if (win?.__API_BASE_URL__) {
       if (typeof console !== 'undefined' && console.log) {
-        // eslint-disable-next-line no-console
-        console.log('[API Client] Using API URL from window.__API_BASE_URL__:', win.__API_BASE_URL__);
+        console.log(
+          '[API Client] Using API URL from window.__API_BASE_URL__:',
+          win.__API_BASE_URL__
+        );
       }
       return win.__API_BASE_URL__;
     }
   }
-  
+
   // Default fallback - use Railway URL for production
   const fallbackUrl = 'https://twin-production-a0e4.up.railway.app';
   if (typeof console !== 'undefined' && console.warn) {
-    // eslint-disable-next-line no-console
     console.warn('[API Client] No API URL found in env, using fallback:', fallbackUrl);
   }
   return fallbackUrl;
@@ -93,7 +93,7 @@ export function setTokenProvider(provider: TokenProvider | null): void {
 
 export class ApiClientError extends Error {
   public code?: string;
-  
+
   constructor(
     message: string,
     public statusCode?: number,
@@ -117,7 +117,9 @@ async function handleResponse<T>(response: Response): Promise<T> {
 
     if (isJson) {
       try {
-        const errorData = (await response.json()) as ApiError | { error?: string; message?: string };
+        const errorData = (await response.json()) as
+          | ApiError
+          | { error?: string; message?: string };
         errorMessage = errorData.message || errorData.error || errorMessage;
         errorCode = 'error' in errorData ? errorData.error : undefined;
         errorBody = JSON.stringify(errorData);
@@ -171,13 +173,10 @@ async function handleResponse<T>(response: Response): Promise<T> {
 // Request Helpers
 // ============================================
 
-async function apiRequest<T>(
-  endpoint: string,
-  options: RequestInit = {}
-): Promise<T> {
+async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const baseUrl = getBaseUrl();
   const url = endpoint.startsWith('http') ? endpoint : `${baseUrl}${endpoint}`;
-  
+
   // Debug logging in development
   if (typeof console !== 'undefined' && console.log) {
     console.log('[API Client] Request:', { method: options.method || 'GET', url, baseUrl });
@@ -188,7 +187,7 @@ async function apiRequest<T>(
   const headers: Record<string, string> = {
     ...(options.headers as Record<string, string>),
   };
-  
+
   // Only set Content-Type if we have a body and it's not already set
   if (hasBody && !headers['Content-Type'] && !headers['content-type']) {
     headers['Content-Type'] = 'application/json';
@@ -218,9 +217,9 @@ async function apiRequest<T>(
     });
     clearTimeout(timeoutId);
     return handleResponse<T>(response);
-  } catch (error: any) {
+  } catch (error: unknown) {
     clearTimeout(timeoutId);
-    if (error.name === 'AbortError') {
+    if ((error as { name?: string }).name === 'AbortError') {
       throw new ApiClientError(
         'Request timed out. Please check your network connection.',
         0,
@@ -323,7 +322,7 @@ export async function uploadRecordingFile(
   } else {
     console.warn('[API Client] No token provider set for upload');
   }
-  
+
   console.log('[API Client] Upload headers:', {
     'x-user-id': userId.substring(0, 8) + '...',
     'Content-Type': contentType,
@@ -372,7 +371,7 @@ export async function uploadRecordingFile(
     }
 
     clearTimeout(timeoutId);
-    
+
     // Log response details for debugging
     if (!response.ok) {
       let errorText: string;
@@ -388,7 +387,7 @@ export async function uploadRecordingFile(
         errorBody: errorText.substring(0, 500), // Limit to first 500 chars
       });
     }
-    
+
     return handleResponse<{ success: boolean; message: string }>(response);
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
@@ -563,7 +562,7 @@ export async function listRecordings(
       });
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
-      
+
       // Don't retry on client errors (4xx)
       if (error instanceof ApiClientError && error.statusCode && error.statusCode < 500) {
         throw error;
@@ -607,7 +606,7 @@ export async function getRecording(
       });
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
-      
+
       // Don't retry on client errors (4xx)
       if (error instanceof ApiClientError && error.statusCode && error.statusCode < 500) {
         throw error;
@@ -664,10 +663,7 @@ export interface ChatSession {
 /**
  * Get or create a chat session for a date
  */
-export async function getChatSession(
-  userId: string,
-  date: string
-): Promise<ChatSession> {
+export async function getChatSession(userId: string, date: string): Promise<ChatSession> {
   return apiRequest<ChatSession>(`/api/chat/session?date=${date}`, {
     method: 'GET',
     headers: {
@@ -697,7 +693,7 @@ export async function sendChatMessage(
   if (!params || !params.messages || !Array.isArray(params.messages)) {
     throw new Error('Messages array is required');
   }
-  
+
   if (!params.messages.length) {
     throw new Error('At least one message is required');
   }
@@ -709,13 +705,15 @@ export async function sendChatMessage(
   const chatHeaders: Record<string, string> = {
     'x-user-id': userId,
     'Content-Type': 'application/json',
-    'Accept': 'application/json', // Request JSON instead of streaming
+    Accept: 'application/json', // Request JSON instead of streaming
   };
   if (_tokenProvider) {
     try {
       const token = await _tokenProvider();
       if (token) chatHeaders['Authorization'] = `Bearer ${token}`;
-    } catch { /* continue without token */ }
+    } catch {
+      /* continue without token */
+    }
   }
 
   let response: Response;
@@ -741,7 +739,7 @@ export async function sendChatMessage(
 
   // Check response status and content type
   const contentType = response.headers.get('content-type') || '';
-  
+
   if (!response.ok) {
     let errorData: { message?: string; error?: string } = {};
     try {
@@ -769,15 +767,16 @@ export async function sendChatMessage(
 
   // Check if this is a JSON response (non-streaming) or streaming response
   // Accept both 'application/json' and empty content-type (Fastify defaults to JSON)
-  const isJsonResponse = contentType.includes('application/json') || 
-                        contentType === '' || 
-                        contentType.includes('text/json');
-  
+  const isJsonResponse =
+    contentType.includes('application/json') ||
+    contentType === '' ||
+    contentType.includes('text/json');
+
   if (isJsonResponse || !contentType.includes('text/event-stream')) {
     // Non-streaming JSON response - much simpler!
     try {
-      const data = await response.json() as { text?: string; message?: string; error?: string };
-      
+      const data = (await response.json()) as { text?: string; message?: string; error?: string };
+
       // Check for error in response
       if (data.error) {
         throw new ApiClientError(
@@ -786,9 +785,9 @@ export async function sendChatMessage(
           data.error
         );
       }
-      
+
       const responseText = data.text || data.message || '';
-      
+
       if (!responseText.trim()) {
         throw new ApiClientError(
           'Received empty response from server',
@@ -796,7 +795,7 @@ export async function sendChatMessage(
           'EMPTY_RESPONSE'
         );
       }
-      
+
       return responseText;
     } catch (parseError) {
       // If JSON parsing fails, it might be a streaming response
@@ -814,13 +813,9 @@ export async function sendChatMessage(
   }
 
   // Fallback to streaming for backwards compatibility
-  
+
   if (!response.body) {
-    throw new ApiClientError(
-      'No response body received',
-      response.status,
-      'NO_BODY'
-    );
+    throw new ApiClientError('No response body received', response.status, 'NO_BODY');
   }
 
   const reader = response.body.getReader();
@@ -910,9 +905,7 @@ export interface VoiceProfileStatusResponse {
 /**
  * Check if user has a voice profile
  */
-export async function getVoiceProfileStatus(
-  userId: string
-): Promise<VoiceProfileStatusResponse> {
+export async function getVoiceProfileStatus(userId: string): Promise<VoiceProfileStatusResponse> {
   return apiRequest<VoiceProfileStatusResponse>('/api/voice-profile/status', {
     method: 'GET',
     headers: {
@@ -944,7 +937,9 @@ export async function enrollVoiceProfile(
     try {
       const token = await _tokenProvider();
       if (token) enrollHeaders['Authorization'] = `Bearer ${token}`;
-    } catch { /* continue without token */ }
+    } catch {
+      /* continue without token */
+    }
   }
 
   const response = await fetch(url, {
@@ -996,6 +991,20 @@ export interface MeResponse {
   email: string;
   consentAcceptedAt: string | null;
   consentRevokedAt: string | null;
+  subscription?: {
+    tier: string;
+    expiresAt: string | null;
+    limits: {
+      recordingsPerMonth: number | null;
+      maxRecordingMinutes: number | null;
+      chatMessagesPerDay: number | null;
+      historyLimit: number | null;
+    };
+    usage: {
+      recordingsThisMonth: number;
+      chatMessagesToday: number;
+    };
+  };
 }
 
 /**

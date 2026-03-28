@@ -1,3 +1,4 @@
+/* global process, console */
 /**
  * SettingsScreen
  *
@@ -27,6 +28,7 @@ import {
 } from 'firebase/auth';
 import { auth } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
+import { useSubscription } from '../contexts/SubscriptionContext';
 import { deleteAccountApi } from '@komuchi/shared';
 
 const SUPPORT_EMAIL = process.env.EXPO_PUBLIC_SUPPORT_EMAIL || '';
@@ -36,10 +38,18 @@ interface SettingsScreenProps {
   onDataConsent: () => void;
   onPrivacyPolicy: () => void;
   onTermsOfService: () => void;
+  onUpgrade?: () => void;
 }
 
-export default function SettingsScreen({ onBack, onDataConsent, onPrivacyPolicy, onTermsOfService }: SettingsScreenProps) {
+export default function SettingsScreen({
+  onBack,
+  onDataConsent,
+  onPrivacyPolicy,
+  onTermsOfService,
+  onUpgrade,
+}: SettingsScreenProps) {
   const { user } = useAuth();
+  const { isPro, loading: subLoading } = useSubscription();
   const [signingOut, setSigningOut] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -124,7 +134,7 @@ export default function SettingsScreen({ onBack, onDataConsent, onPrivacyPolicy,
         'Error',
         err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential'
           ? 'Incorrect password. Please try again.'
-          : err.message || 'Failed to delete account.',
+          : err.message || 'Failed to delete account.'
       );
     } finally {
       setDeletingAccount(false);
@@ -141,8 +151,8 @@ export default function SettingsScreen({ onBack, onDataConsent, onPrivacyPolicy,
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Delete Account</Text>
             <Text style={styles.modalBody}>
-              This will permanently delete your account, all recordings,
-              transcripts, and debriefs. This action cannot be undone.
+              This will permanently delete your account, all recordings, transcripts, and debriefs.
+              This action cannot be undone.
             </Text>
             <Text style={styles.modalBody}>
               Type <Text style={styles.bold}>DELETE</Text> to confirm:
@@ -249,6 +259,26 @@ export default function SettingsScreen({ onBack, onDataConsent, onPrivacyPolicy,
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
+        {/* ─── Twin Pro ─── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Twin Pro</Text>
+          {subLoading ? (
+            <View style={styles.row}>
+              <ActivityIndicator size="small" color="#0ff" />
+            </View>
+          ) : isPro ? (
+            <View style={styles.row}>
+              <Text style={styles.rowLabel}>Plan</Text>
+              <Text style={[styles.rowValue, { color: '#0ff' }]}>Pro ✓</Text>
+            </View>
+          ) : (
+            <TouchableOpacity style={styles.upgradeButton} onPress={onUpgrade}>
+              <Text style={styles.upgradeButtonText}>Upgrade to Twin Pro</Text>
+              <Text style={styles.upgradeButtonSub}>$4.99/mo · 7-day free trial</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
         {/* ─── Account ─── */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Account</Text>
@@ -277,18 +307,12 @@ export default function SettingsScreen({ onBack, onDataConsent, onPrivacyPolicy,
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Legal</Text>
 
-          <TouchableOpacity
-            style={styles.row}
-            onPress={onPrivacyPolicy}
-          >
+          <TouchableOpacity style={styles.row} onPress={onPrivacyPolicy}>
             <Text style={styles.rowLabel}>Privacy Policy</Text>
             <Text style={styles.rowChevron}>›</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.row}
-            onPress={onTermsOfService}
-          >
+          <TouchableOpacity style={styles.row} onPress={onTermsOfService}>
             <Text style={styles.rowLabel}>Terms of Service</Text>
             <Text style={styles.rowChevron}>›</Text>
           </TouchableOpacity>
@@ -301,7 +325,7 @@ export default function SettingsScreen({ onBack, onDataConsent, onPrivacyPolicy,
                 return;
               }
               Linking.openURL(`mailto:${SUPPORT_EMAIL}`).catch(() =>
-                Alert.alert('Error', 'Could not open email client.'),
+                Alert.alert('Error', 'Could not open email client.')
               );
             }}
           >
@@ -386,6 +410,23 @@ const styles = StyleSheet.create({
   rowChevron: { color: '#555', fontSize: 20, marginLeft: 8 },
   dangerRow: { borderWidth: 1, borderColor: '#f44' },
   dangerRowLabel: { color: '#f44', fontSize: 16 },
+  upgradeButton: {
+    backgroundColor: '#0ff',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  upgradeButtonText: {
+    color: '#000',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  upgradeButtonSub: {
+    color: '#333',
+    fontSize: 12,
+    marginTop: 2,
+  },
   signOutButton: {
     backgroundColor: '#1a1a1a',
     paddingVertical: 16,

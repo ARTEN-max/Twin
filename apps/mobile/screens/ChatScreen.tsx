@@ -1,6 +1,7 @@
+/* global setInterval, clearInterval, setTimeout, __DEV__, console */
 /**
  * ChatScreen
- * 
+ *
  * Daily homie coach chat interface that uses today's recordings as context.
  * Features:
  * - Messages list (user + assistant bubbles)
@@ -48,6 +49,7 @@ const ensureStorageDir = async (uid: string) => {
 
 interface ChatScreenProps {
   onBack?: () => void;
+  onPaywall?: (reason: string) => void;
 }
 
 interface DailyContext {
@@ -65,7 +67,7 @@ interface DailyContext {
   }>;
 }
 
-export default function ChatScreen({ onBack }: ChatScreenProps) {
+export default function ChatScreen({ onBack: _onBack, onPaywall }: ChatScreenProps) {
   const { user } = useAuth();
   const userId = user!.uid;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -140,37 +142,40 @@ export default function ChatScreen({ onBack }: ChatScreenProps) {
       console.warn('normalizeMessages: input is not an array', msgs);
       return [];
     }
-    
+
     return msgs
       .map((msg, index) => {
         if (!msg || typeof msg !== 'object') {
           console.warn(`normalizeMessages: invalid message at index ${index}`, msg);
           return null;
         }
-        
+
         let content = msg.content;
-        
+
         // If content is a Promise, we can't resolve it here, so filter it out
         if (content && typeof content === 'object' && 'then' in content) {
           console.warn(`Found Promise in message content at index ${index}, filtering out`, msg);
           return null;
         }
-        
+
         // Handle case where content might be [object Promise] string
         if (typeof content === 'string' && content.includes('[object Promise]')) {
-          console.warn(`Found [object Promise] string in message at index ${index}, filtering out`, msg);
+          console.warn(
+            `Found [object Promise] string in message at index ${index}, filtering out`,
+            msg
+          );
           return null;
         }
-        
+
         // Ensure content is always a string
         const normalizedContent = typeof content === 'string' ? content : String(content || '');
-        
+
         // Filter out messages with empty content (corrupted messages)
         if (!normalizedContent.trim()) {
           console.warn(`Found empty message at index ${index}, filtering out`, msg);
           return null;
         }
-        
+
         return {
           ...msg,
           content: normalizedContent,
@@ -191,9 +196,7 @@ export default function ChatScreen({ onBack }: ChatScreenProps) {
       });
 
       const recordingsArray = recordingsResponse?.data || [];
-      const completeRecordings = recordingsArray.filter(
-        (r: any) => r.status === 'complete'
-      );
+      const completeRecordings = recordingsArray.filter((r: any) => r.status === 'complete');
 
       // Fetch full details (transcript + debrief) for complete recordings
       const contextRecordings = await Promise.all(
@@ -223,35 +226,23 @@ export default function ChatScreen({ onBack }: ChatScreenProps) {
         })
       );
 
-      const validRecordings = contextRecordings.filter((r) => r !== null) as DailyContext['recordings'];
+      const validRecordings = contextRecordings.filter(
+        (r) => r !== null
+      ) as DailyContext['recordings'];
       setDailyContext({ recordings: validRecordings });
 
       // Load chat session from backend
       try {
         const session = await getChatSession(userId, today);
-          if (session.messages && session.messages.length > 0) {
-            const normalizedMessages = normalizeMessages(session.messages);
-            setMessages(normalizedMessages);
-            await FileSystem.writeAsStringAsync(
-              getStoragePath(today),
-              JSON.stringify(normalizedMessages)
-            );
-          } else {
-            // Try loading from local storage
-            try {
-              const localMessages = await FileSystem.readAsStringAsync(getStoragePath(today));
-              if (localMessages) {
-                const parsed = JSON.parse(localMessages);
-                const normalizedMessages = normalizeMessages(parsed);
-                setMessages(normalizedMessages);
-              }
-            } catch {
-              // File doesn't exist, that's okay
-            }
-          }
-        } catch (sessionError) {
-          console.error('Error loading chat session:', sessionError);
-          // Try loading from local storage as fallback
+        if (session.messages && session.messages.length > 0) {
+          const normalizedMessages = normalizeMessages(session.messages);
+          setMessages(normalizedMessages);
+          await FileSystem.writeAsStringAsync(
+            getStoragePath(today),
+            JSON.stringify(normalizedMessages)
+          );
+        } else {
+          // Try loading from local storage
           try {
             const localMessages = await FileSystem.readAsStringAsync(getStoragePath(today));
             if (localMessages) {
@@ -263,14 +254,28 @@ export default function ChatScreen({ onBack }: ChatScreenProps) {
             // File doesn't exist, that's okay
           }
         }
+      } catch (sessionError) {
+        console.error('Error loading chat session:', sessionError);
+        // Try loading from local storage as fallback
+        try {
+          const localMessages = await FileSystem.readAsStringAsync(getStoragePath(today));
+          if (localMessages) {
+            const parsed = JSON.parse(localMessages);
+            const normalizedMessages = normalizeMessages(parsed);
+            setMessages(normalizedMessages);
+          }
+        } catch {
+          // File doesn't exist, that's okay
+        }
+      }
     } catch (err) {
       console.error('Error loading chat data:', err);
       const errorMessage =
         err instanceof ApiClientError
           ? `API Error: ${err.message} (${err.statusCode})`
           : err instanceof Error
-          ? err.message
-          : 'Failed to load chat';
+            ? err.message
+            : 'Failed to load chat';
       setError(errorMessage);
 
       // Try loading from local storage as fallback
@@ -292,10 +297,7 @@ export default function ChatScreen({ onBack }: ChatScreenProps) {
   const saveMessagesLocally = async (msgs: ChatMessage[]) => {
     try {
       await ensureStorageDir(userId);
-      await FileSystem.writeAsStringAsync(
-        getStoragePath(today),
-        JSON.stringify(msgs)
-      );
+      await FileSystem.writeAsStringAsync(getStoragePath(today), JSON.stringify(msgs));
     } catch (err) {
       console.error('Error saving messages locally:', err);
     }
@@ -315,7 +317,7 @@ export default function ChatScreen({ onBack }: ChatScreenProps) {
 
     // Get current messages and add user message
     let messagesWithUser = [...messages, userMessage];
-    
+
     // Only update UI and clear input on first attempt
     if (retryCount === 0) {
       const normalizedMessages = normalizeMessages(messagesWithUser);
@@ -334,7 +336,7 @@ export default function ChatScreen({ onBack }: ChatScreenProps) {
     try {
       // Remove any loading messages, but keep all other messages including user message
       const messagesWithoutLoading = messagesWithUser.filter(
-        m => !m.id.startsWith('assistant-loading-')
+        (m) => !m.id.startsWith('assistant-loading-')
       );
 
       // Convert to UIMessage format expected by backend (with parts array)
@@ -343,7 +345,7 @@ export default function ChatScreen({ onBack }: ChatScreenProps) {
         role: m.role,
         parts: [{ type: 'text' as const, text: m.content }],
       }));
-      
+
       // Add a temporary loading message
       const loadingMessageId = `assistant-loading-${Date.now()}`;
       const loadingMessage: ChatMessage = {
@@ -356,14 +358,14 @@ export default function ChatScreen({ onBack }: ChatScreenProps) {
       const messagesWithLoading = [...messagesWithoutLoading, loadingMessage];
       const normalizedWithLoading = normalizeMessages(messagesWithLoading);
       setMessages(normalizedWithLoading);
-      
+
       let responseText: string;
       try {
         responseText = await sendChatMessage(userId, {
           messages: uiMessages,
           date: today,
         });
-        
+
         if (!responseText || responseText.trim() === '') {
           throw new Error('Empty response from server');
         }
@@ -386,12 +388,12 @@ export default function ChatScreen({ onBack }: ChatScreenProps) {
       // messagesWithoutLoading already has the user message, so just add assistant
       const finalMessages = [...messagesWithoutLoading, assistantMessage];
       const normalizedFinalMessages = normalizeMessages(finalMessages);
-      
+
       setMessages(normalizedFinalMessages);
       await saveMessagesLocally(normalizedFinalMessages);
       setSending(false);
       setError(null);
-      
+
       // Ensure input is cleared after successful send
       setInputText('');
 
@@ -401,12 +403,13 @@ export default function ChatScreen({ onBack }: ChatScreenProps) {
       }, 100);
     } catch (err) {
       // Check if this is a retryable streaming error
-      const isRetryableError = err instanceof ApiClientError && 
-        (err.code === 'STREAM_NOT_READY' || 
-         err.code === 'EMPTY_STREAM' ||
-         err.message.includes('not ready') || 
-         err.message.includes('no response body'));
-      
+      const isRetryableError =
+        err instanceof ApiClientError &&
+        (err.code === 'STREAM_NOT_READY' ||
+          err.code === 'EMPTY_STREAM' ||
+          err.message.includes('not ready') ||
+          err.message.includes('no response body'));
+
       // Auto-retry up to 4 times with increasing delays
       // The first retry happens quickly, subsequent ones wait longer
       if (isRetryableError && retryCount < 4) {
@@ -414,7 +417,9 @@ export default function ChatScreen({ onBack }: ChatScreenProps) {
         const delay = delays[retryCount] || 2000;
         // Only log retries in development, don't show errors to user
         if (__DEV__) {
-          console.log(`Auto-retrying chat message (attempt ${retryCount + 1}/4) after ${delay}ms...`);
+          console.log(
+            `Auto-retrying chat message (attempt ${retryCount + 1}/4) after ${delay}ms...`
+          );
         }
         // Don't show error during retries - keep the loading state
         setTimeout(() => {
@@ -422,18 +427,27 @@ export default function ChatScreen({ onBack }: ChatScreenProps) {
         }, delay);
         return; // Don't set error or stop sending yet
       }
-      
+
       // Only log error if we're not retrying
       console.error('Error sending message:', err);
-      
+
+      // 402 = chat limit reached → show paywall
+      if (err instanceof ApiClientError && err.statusCode === 402) {
+        const messagesWithoutLoading = messages.filter(
+          (m) => !m.id.startsWith('assistant-loading-')
+        );
+        setMessages(normalizeMessages(messagesWithoutLoading));
+        setSending(false);
+        onPaywall?.('chat_limit_reached');
+        return;
+      }
+
       // If retries exhausted or non-retryable error, show error
       // Remove any loading messages
-      const messagesWithoutLoading = messages.filter(
-        m => !m.id.startsWith('assistant-loading-')
-      );
+      const messagesWithoutLoading = messages.filter((m) => !m.id.startsWith('assistant-loading-'));
       const normalizedWithoutLoading = normalizeMessages(messagesWithoutLoading);
       setMessages(normalizedWithoutLoading);
-      
+
       // Handle API key missing error gracefully
       let errorMessage: string;
       if (err instanceof ApiClientError) {
@@ -460,12 +474,12 @@ export default function ChatScreen({ onBack }: ChatScreenProps) {
 
   const renderMessage = ({ item }: { item: ChatMessage }) => {
     const isUser = item.role === 'user';
-    
+
     // Don't render messages with empty or corrupted content
     if (!item.content || !item.content.trim() || item.content.includes('[object Promise]')) {
       return null;
     }
-    
+
     return (
       <View
         style={[
@@ -473,12 +487,7 @@ export default function ChatScreen({ onBack }: ChatScreenProps) {
           isUser ? styles.userMessageContainer : styles.assistantMessageContainer,
         ]}
       >
-        <View
-          style={[
-            styles.messageBubble,
-            isUser ? styles.userBubble : styles.assistantBubble,
-          ]}
-        >
+        <View style={[styles.messageBubble, isUser ? styles.userBubble : styles.assistantBubble]}>
           <Text style={[styles.messageText, isUser ? styles.userText : styles.assistantText]}>
             {item.content}
           </Text>
@@ -493,7 +502,8 @@ export default function ChatScreen({ onBack }: ChatScreenProps) {
         <View style={styles.emptyState}>
           <Text style={styles.emptyStateTitle}>Record something to unlock your daily context.</Text>
           <Text style={styles.emptyStateText}>
-            Once you have recordings with transcripts and debriefs, I'll be able to help you reflect on your day.
+            Once you have recordings with transcripts and debriefs, I'll be able to help you reflect
+            on your day.
           </Text>
         </View>
       );
@@ -542,10 +552,18 @@ export default function ChatScreen({ onBack }: ChatScreenProps) {
 
       <FlatList
         ref={flatListRef}
-        data={messages.filter(m => m.content && m.content.trim() && !m.content.includes('[object Promise]'))}
+        data={messages.filter(
+          (m) => m.content && m.content.trim() && !m.content.includes('[object Promise]')
+        )}
         renderItem={renderMessage}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={messages.filter(m => m.content && m.content.trim() && !m.content.includes('[object Promise]')).length === 0 ? styles.emptyList : styles.messagesList}
+        contentContainerStyle={
+          messages.filter(
+            (m) => m.content && m.content.trim() && !m.content.includes('[object Promise]')
+          ).length === 0
+            ? styles.emptyList
+            : styles.messagesList
+        }
         ListEmptyComponent={renderEmptyState}
         onContentSizeChange={() => {
           flatListRef.current?.scrollToEnd({ animated: true });

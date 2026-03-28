@@ -1,6 +1,7 @@
+/* global setTimeout, clearTimeout, AbortController, console, fetch, Response, FormData, __DEV__, process */
 /**
  * VoiceProfileScreen
- * 
+ *
  * Voice enrollment UI for creating a voice profile.
  * Features:
  * - Record voice sample (10-30 seconds recommended)
@@ -10,6 +11,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
+import type { AppStateStatus } from 'react-native';
 import {
   View,
   Text,
@@ -19,19 +21,13 @@ import {
   Alert,
   Linking,
   AppState,
-  AppStateStatus,
   ScrollView,
-  Platform,
 } from 'react-native';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import Constants from 'expo-constants';
 import { useAuth } from '../contexts/AuthContext';
-import {
-  getVoiceProfileStatus,
-  deleteVoiceProfile,
-  ApiClientError,
-} from '@komuchi/shared';
+import { getVoiceProfileStatus, deleteVoiceProfile, ApiClientError } from '@komuchi/shared';
 
 // User ID is now provided by Firebase Auth via useAuth()
 
@@ -47,9 +43,10 @@ type VoiceProfileState =
 
 interface VoiceProfileScreenProps {
   onBack: () => void;
+  onPaywall?: () => void;
 }
 
-export default function VoiceProfileScreen({ onBack }: VoiceProfileScreenProps) {
+export default function VoiceProfileScreen({ onBack, onPaywall }: VoiceProfileScreenProps) {
   const { user } = useAuth();
   const userId = user!.uid;
   const [state, setState] = useState<VoiceProfileState>('checking');
@@ -72,10 +69,7 @@ export default function VoiceProfileScreen({ onBack }: VoiceProfileScreenProps) 
   // Handle app backgrounding during recording
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextAppState) => {
-      if (
-        appStateRef.current.match(/active/) &&
-        nextAppState.match(/inactive|background/)
-      ) {
+      if (appStateRef.current.match(/active/) && nextAppState.match(/inactive|background/)) {
         if (state === 'recording' && recording) {
           handleStop();
         }
@@ -137,7 +131,7 @@ export default function VoiceProfileScreen({ onBack }: VoiceProfileScreenProps) 
           recording.stopAndUnloadAsync().catch(() => {
             // Ignore errors - recording may already be unloaded
           });
-        } catch (err) {
+        } catch {
           // Ignore errors in cleanup
         }
       }
@@ -220,13 +214,13 @@ export default function VoiceProfileScreen({ onBack }: VoiceProfileScreenProps) 
       );
 
       console.log('Recording started successfully');
-      
+
       // Clear any existing timeout first
       if (durationTimeoutRef.current) {
         clearTimeout(durationTimeoutRef.current);
         durationTimeoutRef.current = null;
       }
-      
+
       setRecording(newRecording);
       durationRef.current = 0; // Reset ref
       setDuration(0); // Reset duration when starting
@@ -239,7 +233,7 @@ export default function VoiceProfileScreen({ onBack }: VoiceProfileScreenProps) 
           const newDuration = durationRef.current;
           console.log('⏱️ Timer tick - Setting duration to:', newDuration);
           setDuration(newDuration);
-          
+
           // Schedule next tick
           durationTimeoutRef.current = setTimeout(scheduleNextTick, 1000);
         } else {
@@ -247,11 +241,11 @@ export default function VoiceProfileScreen({ onBack }: VoiceProfileScreenProps) 
           durationTimeoutRef.current = null;
         }
       };
-      
+
       // Start the first tick immediately
       durationTimeoutRef.current = setTimeout(scheduleNextTick, 1000);
       console.log('✅ Duration timer started using recursive setTimeout');
-      
+
       // Now set state - useEffect will see timeout already exists
       setState('recording');
     } catch (err) {
@@ -280,12 +274,12 @@ export default function VoiceProfileScreen({ onBack }: VoiceProfileScreenProps) 
       console.log('Stopping recording...');
       // Get URI before stopping (it's available while recording)
       const uri = recording.getURI();
-      
+
       // Stop and unload the recording
       await recording.stopAndUnloadAsync();
-      
+
       console.log('Recording stopped, URI:', uri);
-      
+
       if (!uri) {
         throw new Error('No recording URI returned');
       }
@@ -293,11 +287,11 @@ export default function VoiceProfileScreen({ onBack }: VoiceProfileScreenProps) 
       // Preserve duration from ref (more reliable than state)
       const finalDuration = durationRef.current;
       console.log('Recording saved, final duration:', finalDuration, 'seconds');
-      
+
       setAudioUri(uri);
       setRecording(null);
       setState('idle');
-      
+
       // Ensure duration is preserved from ref
       setDuration(finalDuration);
     } catch (err) {
@@ -327,7 +321,7 @@ export default function VoiceProfileScreen({ onBack }: VoiceProfileScreenProps) 
         // Try to stop and unload, but don't fail if already unloaded
         try {
           await recording.stopAndUnloadAsync();
-        } catch (err) {
+        } catch {
           // Recording might already be stopped/unloaded, try just unloading
           try {
             await recording.unloadAsync();
@@ -350,8 +344,13 @@ export default function VoiceProfileScreen({ onBack }: VoiceProfileScreenProps) 
   };
 
   const handleEnroll = async () => {
-    console.log('🚀 handleEnroll called', { audioUri, duration, state, durationRef: durationRef.current });
-    
+    console.log('🚀 handleEnroll called', {
+      audioUri,
+      duration,
+      state,
+      durationRef: durationRef.current,
+    });
+
     if (!audioUri) {
       console.error('❌ No audioUri available');
       Alert.alert('Error', 'No recording available. Please record a voice sample first.');
@@ -361,8 +360,12 @@ export default function VoiceProfileScreen({ onBack }: VoiceProfileScreenProps) 
 
     // Use durationRef for more reliable duration check
     const durationSeconds = durationRef.current || duration;
-    console.log('📏 Duration check:', { durationSeconds, duration, durationRef: durationRef.current });
-    
+    console.log('📏 Duration check:', {
+      durationSeconds,
+      duration,
+      durationRef: durationRef.current,
+    });
+
     if (durationSeconds < 5) {
       const msg = `Recording too short (${durationSeconds}s). Please record at least 5 seconds of your voice.`;
       console.error('❌', msg);
@@ -386,7 +389,7 @@ export default function VoiceProfileScreen({ onBack }: VoiceProfileScreenProps) 
       // Check if file exists
       const fileInfo = await FileSystem.getInfoAsync(audioUri);
       console.log('📁 File info:', fileInfo);
-      
+
       if (!fileInfo.exists) {
         throw new Error('Audio file not found. Please record again.');
       }
@@ -400,7 +403,12 @@ export default function VoiceProfileScreen({ onBack }: VoiceProfileScreenProps) 
         mimeType = 'audio/m4a';
       }
 
-      console.log('📋 Preparing upload', { audioUri, mimeType, durationSeconds, fileSize: fileInfo.size });
+      console.log('📋 Preparing upload', {
+        audioUri,
+        mimeType,
+        durationSeconds,
+        fileSize: fileInfo.size,
+      });
 
       // Get API base URL from config (set in app.json extra or EXPO_PUBLIC_API_BASE_URL env var)
       // On simulator: localhost works. On physical device: use your computer's LAN IP.
@@ -422,13 +430,13 @@ export default function VoiceProfileScreen({ onBack }: VoiceProfileScreenProps) 
         if (!healthResponse.ok) {
           throw new Error(`API responded with ${healthResponse.status}`);
         }
-      } catch (healthError: any) {
+      } catch {
         throw new Error(
           `Cannot reach API server at ${baseUrl}.\n\n` +
-          `Please check:\n` +
-          `1. API server is running (test: curl ${baseUrl}/api/health)\n` +
-          `2. Device and server are on the same network\n` +
-          `3. Correct IP in app.json extra.EXPO_PUBLIC_API_BASE_URL`
+            `Please check:\n` +
+            `1. API server is running (test: curl ${baseUrl}/api/health)\n` +
+            `2. Device and server are on the same network\n` +
+            `3. Correct IP in app.json extra.EXPO_PUBLIC_API_BASE_URL`
         );
       }
 
@@ -472,21 +480,35 @@ export default function VoiceProfileScreen({ onBack }: VoiceProfileScreenProps) 
         clearTimeout(timeoutId);
         abortControllerRef.current = null;
         if (fetchError.name === 'AbortError') {
-          throw new Error('Upload cancelled or timed out.\n\nIf this keeps happening, the diarization service may not be running.\nStart it with: docker compose up diarization -d');
+          throw new Error(
+            'Upload cancelled or timed out.\n\nIf this keeps happening, the diarization service may not be running.\nStart it with: docker compose up diarization -d'
+          );
         }
-        if (fetchError.message?.includes('Network request failed') || fetchError.message?.includes('Failed to connect')) {
-          throw new Error(`Cannot connect to API server.\n\nPlease check:\n1. API server is running (${baseUrl})\n2. Device and computer are on the same network\n3. Firewall allows connections\n4. Diarization service is running (port 8001)`);
+        if (
+          fetchError.message?.includes('Network request failed') ||
+          fetchError.message?.includes('Failed to connect')
+        ) {
+          throw new Error(
+            `Cannot connect to API server.\n\nPlease check:\n1. API server is running (${baseUrl})\n2. Device and computer are on the same network\n3. Firewall allows connections\n4. Diarization service is running (port 8001)`
+          );
         }
         throw fetchError;
       }
 
-      console.log('📥 Response received:', { 
-        status: response.status, 
+      console.log('📥 Response received:', {
+        status: response.status,
         statusText: response.statusText,
-        headers: Object.fromEntries(response.headers.entries())
+        headers: Object.fromEntries(response.headers.entries()),
       });
 
       if (!response.ok) {
+        // 402 = pro required for re-enrollment → show paywall
+        if (response.status === 402) {
+          setState('idle');
+          onPaywall?.();
+          return;
+        }
+
         let errorMessage = 'Failed to enroll voice profile';
         try {
           const contentType = response.headers.get('content-type') || '';
@@ -529,8 +551,8 @@ export default function VoiceProfileScreen({ onBack }: VoiceProfileScreenProps) 
         err instanceof ApiClientError
           ? `API Error: ${err.message} (${err.statusCode})`
           : err instanceof Error
-          ? err.message
-          : 'Failed to enroll voice profile';
+            ? err.message
+            : 'Failed to enroll voice profile';
       console.error('❌ Error message:', errorMessage);
       Alert.alert('Enrollment Failed', errorMessage);
       setError(errorMessage);
@@ -560,8 +582,8 @@ export default function VoiceProfileScreen({ onBack }: VoiceProfileScreenProps) 
                 err instanceof ApiClientError
                   ? `API Error: ${err.message} (${err.statusCode})`
                   : err instanceof Error
-                  ? err.message
-                  : 'Failed to delete voice profile';
+                    ? err.message
+                    : 'Failed to delete voice profile';
               setError(errorMessage);
               setState('error');
             }
@@ -664,14 +686,10 @@ export default function VoiceProfileScreen({ onBack }: VoiceProfileScreenProps) 
           </View>
 
           {state === 'idle' && !audioUri && (
-            <Text style={styles.helperText}>
-              Tap the microphone to start recording
-            </Text>
+            <Text style={styles.helperText}>Tap the microphone to start recording</Text>
           )}
           {state === 'recording' && (
-            <Text style={styles.recordingHelperText}>
-              Recording... Tap again to stop
-            </Text>
+            <Text style={styles.recordingHelperText}>Recording... Tap again to stop</Text>
           )}
 
           {audioUri && state === 'idle' && (
@@ -690,22 +708,29 @@ export default function VoiceProfileScreen({ onBack }: VoiceProfileScreenProps) 
             {/* Debug info */}
             {__DEV__ && (
               <Text style={[styles.helperText, { color: '#888', fontSize: 12 }]}>
-                Debug: duration={duration}, durationRef={durationRef.current}, state={state}, audioUri={audioUri ? 'yes' : 'no'}
+                Debug: duration={duration}, durationRef={durationRef.current}, state={state},
+                audioUri={audioUri ? 'yes' : 'no'}
               </Text>
             )}
             <TouchableOpacity
               style={[
                 styles.enrollButton,
-                ((durationRef.current || duration) < 5 || (durationRef.current || duration) > 60 || state === 'uploading') && styles.enrollButtonDisabled,
+                ((durationRef.current || duration) < 5 ||
+                  (durationRef.current || duration) > 60 ||
+                  state === 'uploading') &&
+                  styles.enrollButtonDisabled,
                 state === 'uploading' && { opacity: 0.7 },
               ]}
               onPress={() => {
-                console.log('🔵🔵🔵 Enroll button PRESSED!', { 
-                  duration, 
-                  durationRef: durationRef.current, 
-                  state, 
+                console.log('🔵🔵🔵 Enroll button PRESSED!', {
+                  duration,
+                  durationRef: durationRef.current,
+                  state,
                   audioUri,
-                  buttonDisabled: state === 'uploading' || (durationRef.current || duration) < 5 || (durationRef.current || duration) > 60
+                  buttonDisabled:
+                    state === 'uploading' ||
+                    (durationRef.current || duration) < 5 ||
+                    (durationRef.current || duration) > 60,
                 });
                 if (state === 'uploading') {
                   console.warn('⚠️ Button pressed but state is uploading - ignoring');
@@ -713,7 +738,11 @@ export default function VoiceProfileScreen({ onBack }: VoiceProfileScreenProps) 
                 }
                 handleEnroll();
               }}
-              disabled={state === 'uploading' || (durationRef.current || duration) < 5 || (durationRef.current || duration) > 60}
+              disabled={
+                state === 'uploading' ||
+                (durationRef.current || duration) < 5 ||
+                (durationRef.current || duration) > 60
+              }
               activeOpacity={0.7}
             >
               {state === 'uploading' ? (
@@ -725,22 +754,22 @@ export default function VoiceProfileScreen({ onBack }: VoiceProfileScreenProps) 
                 <Text style={styles.enrollButtonText}>Enroll Voice Profile</Text>
               )}
             </TouchableOpacity>
-            {((durationRef.current || duration) < 5 && (durationRef.current || duration) > 0) && (
+            {(durationRef.current || duration) < 5 && (durationRef.current || duration) > 0 && (
               <Text style={styles.helperText}>
                 Record at least 5 seconds to enroll (current: {durationRef.current || duration}s)
               </Text>
             )}
-            {((durationRef.current || duration) === 0) && audioUri && (
+            {(durationRef.current || duration) === 0 && audioUri && (
               <Text style={styles.helperText}>
                 ⚠️ Duration is 0. Please record again (at least 5 seconds).
               </Text>
             )}
-            {((durationRef.current || duration) > 60) && (
+            {(durationRef.current || duration) > 60 && (
               <Text style={styles.helperText}>
                 Recording is too long (max 60 seconds, current: {durationRef.current || duration}s)
               </Text>
             )}
-            {((durationRef.current || duration) >= 5 && (durationRef.current || duration) <= 60) && (
+            {(durationRef.current || duration) >= 5 && (durationRef.current || duration) <= 60 && (
               <Text style={[styles.helperText, { color: '#0ff' }]}>
                 ✓ Duration: {durationRef.current || duration}s - Ready to enroll!
               </Text>
@@ -748,14 +777,22 @@ export default function VoiceProfileScreen({ onBack }: VoiceProfileScreenProps) 
             {state === 'uploading' && (
               <View style={{ marginTop: 10, alignItems: 'center' }}>
                 <ActivityIndicator size="large" color="#0ff" />
-                <Text style={[styles.helperText, { color: '#0ff', marginTop: 10, fontSize: 16, fontWeight: '600' }]}>
+                <Text
+                  style={[
+                    styles.helperText,
+                    { color: '#0ff', marginTop: 10, fontSize: 16, fontWeight: '600' },
+                  ]}
+                >
                   Uploading and processing voice sample...
                 </Text>
                 <Text style={[styles.helperText, { color: '#888', marginTop: 5, fontSize: 12 }]}>
                   This may take a few minutes. Please wait...
                 </Text>
                 <TouchableOpacity
-                  style={[styles.enrollButton, { backgroundColor: '#f44', marginTop: 15, minWidth: 120 }]}
+                  style={[
+                    styles.enrollButton,
+                    { backgroundColor: '#f44', marginTop: 15, minWidth: 120 },
+                  ]}
                   onPress={() => {
                     console.log('🛑 Cancel button pressed');
                     if (abortControllerRef.current) {

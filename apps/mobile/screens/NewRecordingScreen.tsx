@@ -32,6 +32,7 @@ import {
   completeUpload,
   getRecordingStatus,
   retryTranscription,
+  getMe,
   ApiClientError,
 } from '@komuchi/shared';
 import { useAuth } from '../contexts/AuthContext';
@@ -54,9 +55,14 @@ type RecordingState =
 interface NewRecordingScreenProps {
   onComplete: (recordingId: string) => void;
   onCancel: () => void;
+  onPaywall?: () => void;
 }
 
-export default function NewRecordingScreen({ onComplete, onCancel }: NewRecordingScreenProps) {
+export default function NewRecordingScreen({
+  onComplete,
+  onCancel,
+  onPaywall,
+}: NewRecordingScreenProps) {
   const { user } = useAuth();
   const consent = useConsent();
   const userId = user!.uid;
@@ -66,10 +72,24 @@ export default function NewRecordingScreen({ onComplete, onCancel }: NewRecordin
   const [duration, setDuration] = useState(0); // in seconds
   const [error, setError] = useState<string | null>(null);
   const [uploadProgress, setUploadProgress] = useState<string>('');
+  const [usedRecordings, setUsedRecordings] = useState<number | null>(null);
+  const [recordingLimit, setRecordingLimit] = useState<number | null>(null);
   const durationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const durationRef = useRef(0); // Track duration in ref to avoid closure issues
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const isRecordingRef = useRef(false);
+
+  // Fetch usage info on mount
+  useEffect(() => {
+    getMe(userId)
+      .then((me) => {
+        if (me.subscription) {
+          setUsedRecordings(me.subscription.usage.recordingsThisMonth);
+          setRecordingLimit(me.subscription.limits.recordingsPerMonth);
+        }
+      })
+      .catch(() => {}); // non-critical, fail silently
+  }, [userId]);
 
   // Handle app backgrounding during recording
   // Note: We allow recording to continue in background - user must manually stop
@@ -401,6 +421,12 @@ export default function NewRecordingScreen({ onComplete, onCancel }: NewRecordin
       setState('processing');
       await pollForCompletion(createResult.recordingId);
     } catch (err) {
+      // 402 = recording limit reached → show paywall instead of error
+      if (err instanceof ApiClientError && err.statusCode === 402) {
+        onPaywall?.();
+        return;
+      }
+
       console.error('Error in upload flow:', err);
       console.error('Error details:', {
         message: err instanceof Error ? err.message : String(err),
@@ -572,6 +598,11 @@ export default function NewRecordingScreen({ onComplete, onCancel }: NewRecordin
     if (state === 'idle' || state === 'requesting-permission') {
       return (
         <View style={styles.mainContent}>
+          {usedRecordings !== null && recordingLimit !== null && (
+            <Text style={styles.usageBadge}>
+              {usedRecordings} of {recordingLimit} recordings used this month
+            </Text>
+          )}
           <TouchableOpacity
             style={styles.recordButton}
             onPress={startRecording}
@@ -769,6 +800,12 @@ const styles = StyleSheet.create({
     color: '#000',
     fontSize: 16,
     fontWeight: '600',
+  },
+  usageBadge: {
+    fontSize: 12,
+    color: '#888',
+    marginBottom: 20,
+    textAlign: 'center',
   },
   // ── Mic explainer styles ──
   explainerIcon: {
