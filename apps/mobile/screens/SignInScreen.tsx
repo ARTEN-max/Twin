@@ -76,6 +76,7 @@ export default function SignInScreen({ onGoToSignUp, onGoToForgotPassword }: Sig
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         <View style={styles.header}>
           <TwinLogo size={110} />
+          <Text style={styles.appName}>Twin</Text>
           <Text style={styles.subtitle}>Sign in to your account</Text>
         </View>
 
@@ -158,6 +159,14 @@ const styles = StyleSheet.create({
   header: {
     alignItems: 'center',
     marginBottom: 40,
+  },
+  appName: {
+    fontSize: 36,
+    fontWeight: '700',
+    color: '#fff',
+    letterSpacing: 2,
+    marginTop: 12,
+    marginBottom: 4,
   },
   subtitle: {
     fontSize: 16,
