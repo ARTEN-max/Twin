@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import { sendPasswordResetEmail } from 'firebase/auth';
 import { auth } from '../lib/firebase';
+import TwinLogo from '../components/TwinLogo';
 
 interface ForgotPasswordScreenProps {
   onGoToSignIn: () => void;
@@ -64,12 +65,9 @@ export default function ForgotPasswordScreen({ onGoToSignIn }: ForgotPasswordScr
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-      >
+      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         <View style={styles.header}>
-          <Text style={styles.logo}>Twin</Text>
+          <TwinLogo size={110} />
           <Text style={styles.subtitle}>Reset your password</Text>
         </View>
 
@@ -94,7 +92,8 @@ export default function ForgotPasswordScreen({ onGoToSignIn }: ForgotPasswordScr
 
             <View style={styles.form}>
               <Text style={styles.description}>
-                Enter the email address associated with your account and we'll send you a link to reset your password.
+                Enter the email address associated with your account and we'll send you a link to
+                reset your password.
               </Text>
 
               <Text style={styles.label}>Email</Text>
@@ -149,12 +148,6 @@ const styles = StyleSheet.create({
   header: {
     alignItems: 'center',
     marginBottom: 40,
-  },
-  logo: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: '#0ff',
-    marginBottom: 8,
   },
   subtitle: {
     fontSize: 16,

@@ -1,3 +1,4 @@
+/* global console */
 /**
  * ConsentContext
  *
@@ -5,13 +6,8 @@
  * Exposes helpers to accept / revoke consent and a boolean `hasConsent`.
  */
 
-import React, {
-  createContext,
-  useContext,
-  useEffect,
-  useState,
-  useCallback,
-} from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   getMe,
   acceptConsent as acceptConsentApi,
@@ -19,6 +15,8 @@ import {
   type MeResponse,
 } from '@komuchi/shared';
 import { useAuth } from './AuthContext';
+
+const CONSENT_KEY = 'twin:consent';
 
 interface ConsentContextValue {
   /** True while fetching /api/me */
@@ -64,11 +62,23 @@ export function ConsentProvider({ children }: { children: React.ReactNode }) {
       const me: MeResponse = await getMe(user.uid);
       setConsentAcceptedAt(me.consentAcceptedAt);
       setConsentRevokedAt(me.consentRevokedAt);
+      // Sync to local cache
+      await AsyncStorage.setItem(
+        CONSENT_KEY,
+        JSON.stringify({ acceptedAt: me.consentAcceptedAt, revokedAt: me.consentRevokedAt })
+      );
     } catch (err) {
-      console.warn('Failed to fetch /api/me:', err);
-      // Default to no consent if fetch fails
-      setConsentAcceptedAt(null);
-      setConsentRevokedAt(null);
+      console.warn('Failed to fetch /api/me, reading local cache:', err);
+      // Fall back to locally cached consent
+      const cached = await AsyncStorage.getItem(CONSENT_KEY);
+      if (cached) {
+        const { acceptedAt, revokedAt } = JSON.parse(cached);
+        setConsentAcceptedAt(acceptedAt);
+        setConsentRevokedAt(revokedAt);
+      } else {
+        setConsentAcceptedAt(null);
+        setConsentRevokedAt(null);
+      }
     } finally {
       setLoading(false);
     }
@@ -80,17 +90,43 @@ export function ConsentProvider({ children }: { children: React.ReactNode }) {
 
   const accept = useCallback(async () => {
     if (!user) return;
-    const res = await acceptConsentApi(user.uid);
-    setConsentAcceptedAt(res.consentAcceptedAt);
-    setConsentRevokedAt(res.consentRevokedAt);
+    const now = new Date().toISOString();
+    try {
+      const res = await acceptConsentApi(user.uid);
+      setConsentAcceptedAt(res.consentAcceptedAt);
+      setConsentRevokedAt(res.consentRevokedAt);
+      await AsyncStorage.setItem(
+        CONSENT_KEY,
+        JSON.stringify({ acceptedAt: res.consentAcceptedAt, revokedAt: res.consentRevokedAt })
+      );
+    } catch (err) {
+      console.warn('API unavailable, saving consent locally:', err);
+      setConsentAcceptedAt(now);
+      setConsentRevokedAt(null);
+      await AsyncStorage.setItem(CONSENT_KEY, JSON.stringify({ acceptedAt: now, revokedAt: null }));
+    }
   }, [user]);
 
   const revoke = useCallback(async () => {
     if (!user) return;
-    const res = await revokeConsentApi(user.uid);
-    setConsentAcceptedAt(res.consentAcceptedAt);
-    setConsentRevokedAt(res.consentRevokedAt);
-  }, [user]);
+    const now = new Date().toISOString();
+    try {
+      const res = await revokeConsentApi(user.uid);
+      setConsentAcceptedAt(res.consentAcceptedAt);
+      setConsentRevokedAt(res.consentRevokedAt);
+      await AsyncStorage.setItem(
+        CONSENT_KEY,
+        JSON.stringify({ acceptedAt: res.consentAcceptedAt, revokedAt: res.consentRevokedAt })
+      );
+    } catch (err) {
+      console.warn('API unavailable, saving revocation locally:', err);
+      setConsentRevokedAt(now);
+      await AsyncStorage.setItem(
+        CONSENT_KEY,
+        JSON.stringify({ acceptedAt: consentAcceptedAt, revokedAt: now })
+      );
+    }
+  }, [user, consentAcceptedAt]);
 
   return (
     <ConsentContext.Provider

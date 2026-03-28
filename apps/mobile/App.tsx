@@ -1,6 +1,8 @@
+/* global setTimeout */
 import React, { useState, useRef } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { View, StyleSheet, ActivityIndicator, Text } from 'react-native';
+import { View, StyleSheet, ActivityIndicator } from 'react-native';
+import TwinLogo from './components/TwinLogo';
 
 // Auth
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -99,9 +101,7 @@ function AppStack() {
       case 'Recordings':
         return (
           <RecordingsScreen
-            onSelectRecording={(recordingId) =>
-              navigate('RecordingDetail', { recordingId })
-            }
+            onSelectRecording={(recordingId) => navigate('RecordingDetail', { recordingId })}
             onNewRecording={() => navigate('NewRecording')}
             onVoiceProfile={() => navigate('VoiceProfile')}
             onSettings={() => navigate('Settings')}
@@ -193,9 +193,7 @@ function AppStack() {
       default:
         return (
           <RecordingsScreen
-            onSelectRecording={(id) =>
-              navigate('RecordingDetail', { recordingId: id })
-            }
+            onSelectRecording={(id) => navigate('RecordingDetail', { recordingId: id })}
             onNewRecording={() => navigate('NewRecording')}
             onVoiceProfile={() => navigate('VoiceProfile')}
             onSettings={() => navigate('Settings')}
@@ -220,7 +218,7 @@ function AppStack() {
 function SplashScreen() {
   return (
     <View style={styles.splash}>
-      <Text style={styles.splashLogo}>Twin</Text>
+      <TwinLogo size={140} />
       <ActivityIndicator size="large" color="#0ff" style={{ marginTop: 24 }} />
     </View>
   );
@@ -256,18 +254,10 @@ function ConsentGate() {
   if (!hasConsent) {
     // If showing legal pages from consent screen, render them
     if (showPrivacyPolicy) {
-      return (
-        <PrivacyPolicyScreen
-          onBack={() => setShowPrivacyPolicy(false)}
-        />
-      );
+      return <PrivacyPolicyScreen onBack={() => setShowPrivacyPolicy(false)} />;
     }
     if (showTermsOfService) {
-      return (
-        <TermsOfServiceScreen
-          onBack={() => setShowTermsOfService(false)}
-        />
-      );
+      return <TermsOfServiceScreen onBack={() => setShowTermsOfService(false)} />;
     }
     return (
       <ConsentScreen
@@ -303,10 +293,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#000',
-  },
-  splashLogo: {
-    fontSize: 56,
-    fontWeight: 'bold',
-    color: '#0ff',
   },
 });

@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '../lib/firebase';
+import TwinLogo from '../components/TwinLogo';
 
 interface SignUpScreenProps {
   onGoToSignIn: () => void;
@@ -75,12 +76,9 @@ export default function SignUpScreen({ onGoToSignIn }: SignUpScreenProps) {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-      >
+      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         <View style={styles.header}>
-          <Text style={styles.logo}>Twin</Text>
+          <TwinLogo size={110} />
           <Text style={styles.subtitle}>Create your account</Text>
         </View>
 
@@ -168,12 +166,6 @@ const styles = StyleSheet.create({
   header: {
     alignItems: 'center',
     marginBottom: 40,
-  },
-  logo: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: '#0ff',
-    marginBottom: 8,
   },
   subtitle: {
     fontSize: 16,

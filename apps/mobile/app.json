@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Komuchi Mobile",
+    "name": "Twin",
     "slug": "komuchi-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -44,7 +44,7 @@
       "eas": {
         "projectId": ""
       },
-      "EXPO_PUBLIC_API_BASE_URL": "http://192.168.1.3:3001",
+      "EXPO_PUBLIC_API_BASE_URL": "https://twin-production-a0e4.up.railway.app",
       "EXPO_PUBLIC_FIREBASE_API_KEY": "",
       "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "",
       "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "",

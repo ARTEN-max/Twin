@@ -33,22 +33,37 @@ config.resolver.disableHierarchicalLookup = true;
 config.resolver.unstable_enablePackageExports = true;
 
 // 5. Add workspace packages to the resolver - point directly to dist for React Native
-const asyncStoragePath = path.resolve(monorepoRoot, 'node_modules/@react-native-async-storage/async-storage');
+const asyncStoragePath = path.resolve(
+  monorepoRoot,
+  'node_modules/@react-native-async-storage/async-storage'
+);
 const firebasePath = path.resolve(monorepoRoot, 'node_modules/firebase');
 config.resolver.extraNodeModules = {
   '@komuchi/shared': sharedDistPath,
   // Ensure AsyncStorage resolves from root node_modules
   '@react-native-async-storage/async-storage': asyncStoragePath,
   // Ensure Firebase resolves from root node_modules
-  'firebase': firebasePath,
+  firebase: firebasePath,
 };
 
 // 6. Custom resolver to ALWAYS use dist for @komuchi/shared
 const originalResolveRequest = config.resolver.resolveRequest;
 config.resolver.resolveRequest = (context, moduleName, platform) => {
-  // Force @komuchi/shared to always resolve to dist/index.js
+  // Fix monorepo: AppEntry.js at root node_modules does `../../App` which resolves to
+  // the monorepo root instead of apps/mobile. Redirect it to the correct App.tsx.
+  if (
+    moduleName === '../../App' &&
+    context.originModulePath.includes('node_modules/expo/AppEntry')
+  ) {
+    return {
+      filePath: path.resolve(projectRoot, 'App.tsx'),
+      type: 'sourceFile',
+    };
+  }
+
+  // Force @komuchi/shared to always resolve to dist/index.cjs (CJS for Metro compatibility)
   if (moduleName === '@komuchi/shared') {
-    const distIndex = path.join(sharedDistPath, 'index.js');
+    const distIndex = path.join(sharedDistPath, 'index.cjs');
     if (fs.existsSync(distIndex)) {
       return {
         filePath: distIndex,
@@ -56,11 +71,11 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
       };
     }
   }
-  
-  // Force subpath imports to use dist
+
+  // Force subpath imports to use dist CJS
   if (moduleName.startsWith('@komuchi/shared/')) {
     const subpath = moduleName.replace('@komuchi/shared/', '');
-    const distSubpath = path.join(sharedDistPath, subpath, 'index.js');
+    const distSubpath = path.join(sharedDistPath, subpath, 'index.cjs');
     if (fs.existsSync(distSubpath)) {
       return {
         filePath: distSubpath,
@@ -68,7 +83,7 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
       };
     }
   }
-  
+
   // Force AsyncStorage to resolve from root node_modules
   if (moduleName === '@react-native-async-storage/async-storage') {
     const asyncStorageIndex = path.join(asyncStoragePath, 'lib/commonjs/index.js');
@@ -100,7 +115,7 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
       };
     }
   }
-  
+
   // Fall back to default resolver
   if (originalResolveRequest) {
     return originalResolveRequest(context, moduleName, platform);
