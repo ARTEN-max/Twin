@@ -1,6 +1,7 @@
+/* global setTimeout, clearTimeout, console, process, fetch, atob */
 /**
  * NewRecordingScreen
- * 
+ *
  * Native-feeling recording UI for creating new recordings.
  * Features:
  * - Big circular Record button with mic icon
@@ -11,6 +12,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
+import type { AppStateStatus } from 'react-native';
 import {
   View,
   Text,
@@ -20,7 +22,6 @@ import {
   Alert,
   Linking,
   AppState,
-  AppStateStatus,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Audio } from 'expo-av';
@@ -55,10 +56,7 @@ interface NewRecordingScreenProps {
   onCancel: () => void;
 }
 
-export default function NewRecordingScreen({
-  onComplete,
-  onCancel,
-}: NewRecordingScreenProps) {
+export default function NewRecordingScreen({ onComplete, onCancel }: NewRecordingScreenProps) {
   const { user } = useAuth();
   const consent = useConsent();
   const userId = user!.uid;
@@ -101,7 +99,7 @@ export default function NewRecordingScreen({
             const newDuration = durationRef.current;
             console.log('⏱️ Timer tick - Setting duration to:', newDuration);
             setDuration(newDuration);
-            
+
             // Schedule next tick
             durationTimeoutRef.current = setTimeout(scheduleNextTick, 1000);
           } else {
@@ -121,7 +119,6 @@ export default function NewRecordingScreen({
         durationTimeoutRef.current = null;
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state]);
 
   // Cleanup on unmount
@@ -166,7 +163,7 @@ export default function NewRecordingScreen({
       if (!consent.hasConsent) {
         Alert.alert(
           'Consent Required',
-          'You must accept the data processing consent before recording. Go to Settings → Data & Consent.',
+          'You must accept the data processing consent before recording. Go to Settings → Data & Consent.'
         );
         return;
       }
@@ -179,13 +176,13 @@ export default function NewRecordingScreen({
       }
 
       await proceedToRecord();
-    } catch (err: any) {
+    } catch (err: unknown) {
       const errorMessage =
         err instanceof ApiClientError
           ? `API Error: ${err.message} (${err.statusCode})`
           : err instanceof Error
-          ? err.message
-          : 'Failed to start recording';
+            ? err.message
+            : 'Failed to start recording';
       setError(errorMessage);
       setState('error');
     }
@@ -231,7 +228,7 @@ export default function NewRecordingScreen({
       durationRef.current = 0; // Reset ref
       setDuration(0); // Reset duration when starting
       isRecordingRef.current = true;
-      
+
       // Set state - useEffect will handle starting the timer
       setState('recording');
     } catch (err) {
@@ -257,7 +254,7 @@ export default function NewRecordingScreen({
       }
 
       let uri: string | null = null;
-      
+
       // Try to stop and unload, but handle "already unloaded" error gracefully
       try {
         await recording.stopAndUnloadAsync();
@@ -293,38 +290,34 @@ export default function NewRecordingScreen({
 
   const handleCancel = () => {
     if (state === 'recording' && recording) {
-      Alert.alert(
-        'Discard Recording?',
-        'Are you sure you want to discard this recording?',
-        [
-          { text: 'Keep Recording', style: 'cancel' },
-          {
-            text: 'Discard',
-            style: 'destructive',
-            onPress: async () => {
-              try {
-                if (durationTimeoutRef.current) {
-                  clearTimeout(durationTimeoutRef.current);
-                  durationTimeoutRef.current = null;
-                }
-                if (recording) {
-                  await recording.stopAndUnloadAsync();
-                  // Delete the file
-                  const uri = recording.getURI();
-                  if (uri) {
-                    await FileSystem.deleteAsync(uri, { idempotent: true });
-                  }
-                  setRecording(null);
-                }
-                onCancel();
-              } catch (err) {
-                console.error('Error discarding recording:', err);
-                onCancel(); // Still navigate back
+      Alert.alert('Discard Recording?', 'Are you sure you want to discard this recording?', [
+        { text: 'Keep Recording', style: 'cancel' },
+        {
+          text: 'Discard',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              if (durationTimeoutRef.current) {
+                clearTimeout(durationTimeoutRef.current);
+                durationTimeoutRef.current = null;
               }
-            },
+              if (recording) {
+                await recording.stopAndUnloadAsync();
+                // Delete the file
+                const uri = recording.getURI();
+                if (uri) {
+                  await FileSystem.deleteAsync(uri, { idempotent: true });
+                }
+                setRecording(null);
+              }
+              onCancel();
+            } catch (err) {
+              console.error('Error discarding recording:', err);
+              onCancel(); // Still navigate back
+            }
           },
-        ]
-      );
+        },
+      ]);
     } else {
       onCancel();
     }
@@ -369,16 +362,11 @@ export default function NewRecordingScreen({
 
       // Step 3: Upload file (try direct API upload first, fallback to presigned)
       try {
-        await uploadRecordingFile(
-          userId,
-          createResult.recordingId,
-          bytes.buffer,
-          mimeType
-        );
+        await uploadRecordingFile(userId, createResult.recordingId, bytes.buffer, mimeType);
         setUploadProgress('Upload complete, processing...');
       } catch (directUploadError) {
         console.error('Direct upload failed, trying presigned URL:', directUploadError);
-        
+
         // Fallback to presigned URL
         const headers: Record<string, string> = {};
         if (createResult.requiredHeaders) {
@@ -419,20 +407,20 @@ export default function NewRecordingScreen({
         stack: err instanceof Error ? err.stack : undefined,
         name: err instanceof Error ? err.name : undefined,
       });
-      
+
       // If recording failed during processing, make sure we have the recordingId set
       // so the retry button will work
       if (err instanceof Error && err.message.includes('Recording processing failed')) {
         // recordingId should already be set from createResult, but ensure it's preserved
         // The error state will show the retry button
       }
-      
+
       const errorMessage =
         err instanceof ApiClientError
           ? `API Error: ${err.message} (${err.statusCode})`
           : err instanceof Error
-          ? err.message
-          : 'Upload flow failed';
+            ? err.message
+            : 'Upload flow failed';
       setError(errorMessage);
       setState('error');
     }
@@ -449,9 +437,7 @@ export default function NewRecordingScreen({
     while (attempts < maxAttempts) {
       try {
         const statusResult = await getRecordingStatus(userId, id);
-        setUploadProgress(
-          `Processing... (${statusResult.status})`
-        );
+        setUploadProgress(`Processing... (${statusResult.status})`);
 
         if (statusResult.status === 'complete') {
           setState('complete');
@@ -465,7 +451,7 @@ export default function NewRecordingScreen({
 
         if (statusResult.status === 'failed') {
           // Recording failed - use actual error message if available
-          const errorMsg = statusResult.errorMessage 
+          const errorMsg = statusResult.errorMessage
             ? `Recording processing failed: ${statusResult.errorMessage}. You can retry using the "Retry Processing" button.`
             : 'Recording processing failed. You can retry using the "Retry Processing" button.';
           throw new Error(errorMsg);
@@ -490,7 +476,9 @@ export default function NewRecordingScreen({
     }
 
     // Timeout - but don't throw error, just show a message and allow navigation
-    setError('Processing is taking longer than expected. You can check the recording status later.');
+    setError(
+      'Processing is taking longer than expected. You can check the recording status later.'
+    );
     setState('error');
     // Still set recordingId so user can navigate to detail screen
     setRecordingId(id);
@@ -502,17 +490,17 @@ export default function NewRecordingScreen({
       setError(null);
       setState('processing');
       setUploadProgress('Retrying transcription...');
-      
+
       try {
         // First, check the current status
         const statusResult = await getRecordingStatus(userId, recordingId);
-        
+
         if (statusResult.status === 'failed') {
           // Recording failed - retry transcription
           await retryTranscription(userId, recordingId);
           setUploadProgress('Transcription job requeued. Processing...');
         }
-        
+
         // Poll for completion
         await pollForCompletion(recordingId);
       } catch (err) {
@@ -520,8 +508,8 @@ export default function NewRecordingScreen({
           err instanceof ApiClientError
             ? `API Error: ${err.message} (${err.statusCode})`
             : err instanceof Error
-            ? err.message
-            : 'Retry failed';
+              ? err.message
+              : 'Retry failed';
         setError(errorMessage);
         setState('error');
       }
@@ -541,8 +529,7 @@ export default function NewRecordingScreen({
           <Text style={styles.explainerIcon}>🎙️</Text>
           <Text style={styles.explainerTitle}>Microphone Access</Text>
           <Text style={styles.explainerBody}>
-            Twin needs microphone access to record your conversation and
-            generate your debrief.
+            Twin needs microphone access to record your conversation and generate your debrief.
           </Text>
           <TouchableOpacity
             style={styles.explainerCta}
@@ -564,13 +551,10 @@ export default function NewRecordingScreen({
           <Text style={styles.explainerIcon}>🔇</Text>
           <Text style={styles.explainerTitle}>Microphone Denied</Text>
           <Text style={styles.explainerBody}>
-            Twin cannot record without microphone permission. Please enable it
-            in your device Settings.
+            Twin cannot record without microphone permission. Please enable it in your device
+            Settings.
           </Text>
-          <TouchableOpacity
-            style={styles.explainerCta}
-            onPress={() => Linking.openSettings()}
-          >
+          <TouchableOpacity style={styles.explainerCta} onPress={() => Linking.openSettings()}>
             <Text style={styles.explainerCtaText}>Open Settings</Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -600,7 +584,7 @@ export default function NewRecordingScreen({
             )}
           </TouchableOpacity>
           <Text style={styles.helperText}>
-            Audio stays private. Upload starts after you stop.
+            Audio is encrypted and uploaded to our servers for AI transcription after you stop.
           </Text>
         </View>
       );
@@ -609,10 +593,7 @@ export default function NewRecordingScreen({
     if (state === 'recording') {
       return (
         <View style={styles.mainContent}>
-          <TouchableOpacity
-            style={[styles.recordButton, styles.stopButton]}
-            onPress={handleStop}
-          >
+          <TouchableOpacity style={[styles.recordButton, styles.stopButton]} onPress={handleStop}>
             <View style={styles.stopButtonInner} />
           </TouchableOpacity>
           <Text style={styles.timerText}>{formatDuration(duration)}</Text>
@@ -663,9 +644,7 @@ export default function NewRecordingScreen({
     <View style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={handleCancel} style={styles.cancelButton}>
-          <Text style={styles.cancelButtonText}>
-            {state === 'recording' ? 'Cancel' : 'Back'}
-          </Text>
+          <Text style={styles.cancelButtonText}>{state === 'recording' ? 'Cancel' : 'Back'}</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>New Recording</Text>
         <View style={styles.headerSpacer} />

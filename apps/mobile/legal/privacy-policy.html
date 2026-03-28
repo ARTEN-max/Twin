@@ -120,7 +120,8 @@
 <ul>
   <li><strong>Google Firebase</strong> — authentication and user identity management. Firebase's privacy policy is at <a href="https://firebase.google.com/support/privacy" target="_blank">firebase.google.com/support/privacy</a>.</li>
   <li><strong>Cloud storage</strong> — audio files and generated artifacts are stored on our backend infrastructure (hosted on Railway/cloud servers).</li>
-  <li><strong>AI transcription and generation</strong> — audio is sent to AI processing services to generate transcripts and debriefs. These services process your audio under data processing agreements.</li>
+  <li><strong>AI transcription</strong> — audio is sent to <strong>Deepgram</strong> for transcription and/or <strong>OpenAI</strong> (Whisper) for speech-to-text processing. These providers process your audio under data processing agreements and are prohibited from using it to train their models. Deepgram's privacy policy is at <a href="https://deepgram.com/privacy" target="_blank">deepgram.com/privacy</a>. OpenAI's privacy policy is at <a href="https://openai.com/privacy" target="_blank">openai.com/privacy</a>.</li>
+  <li><strong>AI debrief generation</strong> — transcripts (not raw audio) are sent to <strong>OpenAI</strong> (GPT-4) to generate conversation debriefs and power the chat feature. OpenAI processes this data under a data processing agreement.</li>
 </ul>
 
 <h3>Legal requirements</h3>
