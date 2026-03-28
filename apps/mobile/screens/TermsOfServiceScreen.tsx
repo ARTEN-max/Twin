@@ -11,7 +11,8 @@ import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'rea
 import { WebView } from 'react-native-webview';
 
 const TERMS_URL =
-  process.env.EXPO_PUBLIC_TERMS_URL || 'https://twin-a-i.github.io/twin/terms-of-service.html';
+  process.env.EXPO_PUBLIC_TERMS_URL ||
+  'https://twin-a-i.github.io/Twin/apps/mobile/legal/terms-of-service.html';
 
 interface TermsOfServiceScreenProps {
   onBack: () => void;

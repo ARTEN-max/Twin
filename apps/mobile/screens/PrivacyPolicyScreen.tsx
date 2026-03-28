@@ -12,7 +12,7 @@ import { WebView } from 'react-native-webview';
 
 const PRIVACY_URL =
   process.env.EXPO_PUBLIC_PRIVACY_POLICY_URL ||
-  'https://twin-a-i.github.io/twin/privacy-policy.html';
+  'https://twin-a-i.github.io/Twin/apps/mobile/legal/privacy-policy.html';
 
 interface PrivacyPolicyScreenProps {
   onBack: () => void;
