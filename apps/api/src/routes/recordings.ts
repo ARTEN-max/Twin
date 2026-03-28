@@ -26,6 +26,7 @@ import {
 import { enqueueTranscriptionJob, type TranscriptionJobData } from '../queues/index.js';
 import { uploadRateLimit } from '../plugins/rate-limit.js';
 import { db } from '../lib/db.js';
+import { checkAndIncrementRecordingCount } from '../lib/subscription.js';
 
 // ============================================
 // Request Schemas
@@ -84,8 +85,10 @@ async function requireConsent(uid: string): Promise<void> {
   });
 
   if (!user || !user.consentAcceptedAt || user.consentRevokedAt) {
-    const err = new Error('Consent is required before creating or uploading recordings.') as Error & { statusCode: number };
-    (err as any).error = 'consent_required';
+    const err = new Error(
+      'Consent is required before creating or uploading recordings.'
+    ) as Error & { statusCode: number; error: string };
+    err.error = 'consent_required';
     err.statusCode = 403;
     throw err;
   }
@@ -95,7 +98,10 @@ const listRecordingsQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(100).default(20),
   status: z.enum(['pending', 'uploaded', 'processing', 'complete', 'failed']).optional(),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format').optional(),
+  date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format')
+    .optional(),
   cursor: z.string().optional(),
 });
 
@@ -123,6 +129,19 @@ export const recordingsRoutes: FastifyPluginAsync = async (app) => {
 
     // Consent gate — must accept before creating recordings
     await requireConsent(userId);
+
+    // Subscription limit check
+    await ensureUserExists(userId, email);
+    const limitCheck = await checkAndIncrementRecordingCount(userId);
+    if (!limitCheck.allowed) {
+      return reply.status(402).send({
+        error: 'recording_limit_reached',
+        message: `You've used all ${limitCheck.limit} recordings for this month. Upgrade to Twin Pro for unlimited recordings.`,
+        used: limitCheck.used,
+        limit: limitCheck.limit,
+        tier: limitCheck.tier,
+      });
+    }
 
     // Validate request body
     const parseResult = createRecordingSchema.safeParse(request.body);
@@ -376,7 +395,7 @@ export const recordingsRoutes: FastifyPluginAsync = async (app) => {
 
         // 5. Ensure bucket exists, then generate object key and upload to S3
         await ensureBucketExists();
-        
+
         const objectKey = generateObjectKey(userId, id, filename);
         await uploadObject(objectKey, buffer, mimeType, {
           'user-id': userId,
@@ -419,7 +438,7 @@ export const recordingsRoutes: FastifyPluginAsync = async (app) => {
         const errorMessage = error instanceof Error ? error.message : String(error);
         const errorStack = error instanceof Error ? error.stack : undefined;
         request.log.error({ error, errorMessage, errorStack }, 'Failed to upload file');
-        
+
         // Return more detailed error in development, generic in production
         const isDev = process.env.NODE_ENV !== 'production';
         return reply.status(500).send({

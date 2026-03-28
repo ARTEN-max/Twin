@@ -7,6 +7,7 @@ import TwinLogo from './components/TwinLogo';
 // Auth
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ConsentProvider, useConsent } from './contexts/ConsentContext';
+import { SubscriptionProvider } from './contexts/SubscriptionContext';
 
 // Auth screens
 import SignInScreen from './screens/SignInScreen';
@@ -24,6 +25,7 @@ import DataConsentScreen from './screens/DataConsentScreen';
 import ConsentScreen from './screens/ConsentScreen';
 import PrivacyPolicyScreen from './screens/PrivacyPolicyScreen';
 import TermsOfServiceScreen from './screens/TermsOfServiceScreen';
+import PaywallScreen from './screens/PaywallScreen';
 
 import TabBar, { type Tab } from './components/TabBar';
 import type { RootStackParamList, AuthStackParamList } from './navigation/types';
@@ -65,12 +67,18 @@ type ScreenParams = RootStackParamList[Screen];
 function AppStack() {
   const [currentTab, setCurrentTab] = useState<Tab>('Today');
   const [currentScreen, setCurrentScreen] = useState<Screen>('Recordings');
+  const [paywallReason, setPaywallReason] = useState<string | undefined>();
   const [screenParams, setScreenParams] = useState<ScreenParams>(undefined);
   const recordingsRefreshRef = useRef<(() => void) | null>(null);
 
   const navigate = (screen: Screen, params?: ScreenParams) => {
     setCurrentScreen(screen);
     setScreenParams(params);
+  };
+
+  const showPaywall = (reason?: string) => {
+    setPaywallReason(reason);
+    navigate('Paywall');
   };
 
   const handleTabChange = (tab: Tab) => {
@@ -110,7 +118,7 @@ function AppStack() {
           />
         );
       case 'Chat':
-        return <ChatScreen />;
+        return <ChatScreen onPaywall={(reason) => showPaywall(reason)} />;
       case 'RecordingDetail':
         if (screenParams && 'recordingId' in screenParams) {
           return (
@@ -138,12 +146,24 @@ function AppStack() {
               navigate('Recordings');
               setCurrentTab('Today');
             }}
+            onPaywall={() => showPaywall('recording_limit_reached')}
           />
         );
       case 'VoiceProfile':
         return (
           <VoiceProfileScreen
             onBack={() => {
+              navigate('Recordings');
+              setCurrentTab('Today');
+            }}
+            onPaywall={() => showPaywall('voice_reenroll')}
+          />
+        );
+      case 'Paywall':
+        return (
+          <PaywallScreen
+            reason={paywallReason}
+            onClose={() => {
               navigate('Recordings');
               setCurrentTab('Today');
             }}
@@ -231,9 +251,11 @@ function RootNavigator() {
 
   // User is signed in — wrap in ConsentProvider and show ConsentGate
   return (
-    <ConsentProvider>
-      <ConsentGate />
-    </ConsentProvider>
+    <SubscriptionProvider>
+      <ConsentProvider>
+        <ConsentGate />
+      </ConsentProvider>
+    </SubscriptionProvider>
   );
 }
 

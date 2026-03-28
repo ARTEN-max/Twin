@@ -58,6 +58,17 @@ model User {
   consentAcceptedAt DateTime?     @map("consent_accepted_at")
   consentRevokedAt  DateTime?     @map("consent_revoked_at")
   pushToken         String?       @map("push_token") // Expo push notification token
+
+  // Subscription
+  subscriptionTier      String    @default("FREE") @map("subscription_tier") // "FREE" | "PRO"
+  subscriptionExpiresAt DateTime? @map("subscription_expires_at")
+
+  // Usage counters (reset automatically)
+  recordingsThisMonth    Int       @default(0) @map("recordings_this_month")
+  recordingsMonthResetAt DateTime? @map("recordings_month_reset_at")
+  chatMessagesToday      Int       @default(0) @map("chat_messages_today")
+  chatMessagesDayResetAt DateTime? @map("chat_messages_day_reset_at")
+
   createdAt         DateTime      @default(now()) @map("created_at")
   updatedAt         DateTime      @updatedAt @map("updated_at")
   recordings        Recording[]

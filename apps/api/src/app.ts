@@ -8,6 +8,7 @@ import { recordingsRoutes } from './routes/recordings.js';
 import { voiceProfileRoutes } from './routes/voice-profile.js';
 import { chatRoutes } from './routes/chat.js';
 import { meRoutes } from './routes/me.js';
+import { webhookRoutes } from './routes/webhooks.js';
 import { disconnectDb } from './lib/db.js';
 import { disconnectRedis } from './lib/redis.js';
 import { getEnv, isProduction } from './lib/env.js';
@@ -151,6 +152,7 @@ export async function buildApp() {
   await app.register(recordingsRoutes, { prefix: '/api' });
   await app.register(voiceProfileRoutes);
   await app.register(chatRoutes, { prefix: '/api' });
+  await app.register(webhookRoutes, { prefix: '/api' });
 
   // Global error handler
   app.setErrorHandler((error: Error & { statusCode?: number }, request, reply) => {

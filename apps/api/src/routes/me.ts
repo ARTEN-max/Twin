@@ -8,6 +8,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import type { FirebaseUser } from '../plugins/firebase-auth.js';
 import { db } from '../lib/db.js';
 import { deleteObject } from '../lib/storage.js';
+import { getTierLimits } from '../lib/subscription.js';
 
 // ============================================
 // Helpers
@@ -53,12 +54,28 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
 
     const user = await ensureUserExists(uid, email);
 
+    const limits = getTierLimits(user.subscriptionTier);
+
     return reply.status(200).send({
       data: {
         uid: user.id,
         email: user.email,
         consentAcceptedAt: user.consentAcceptedAt?.toISOString() ?? null,
         consentRevokedAt: user.consentRevokedAt?.toISOString() ?? null,
+        subscription: {
+          tier: user.subscriptionTier,
+          expiresAt: user.subscriptionExpiresAt?.toISOString() ?? null,
+          limits: {
+            recordingsPerMonth: limits.recordingsPerMonth,
+            maxRecordingMinutes: limits.maxRecordingMinutes,
+            chatMessagesPerDay: limits.chatMessagesPerDay,
+            historyLimit: limits.historyLimit,
+          },
+          usage: {
+            recordingsThisMonth: user.recordingsThisMonth,
+            chatMessagesToday: user.chatMessagesToday,
+          },
+        },
       },
       success: true,
     });
@@ -141,7 +158,10 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
           try {
             await deleteObject(rec.objectKey);
           } catch (err) {
-            request.log.warn({ objectKey: rec.objectKey, err }, 'Failed to delete S3 object during account deletion');
+            request.log.warn(
+              { objectKey: rec.objectKey, err },
+              'Failed to delete S3 object during account deletion'
+            );
           }
         }
       }

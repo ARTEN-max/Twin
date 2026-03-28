@@ -23,4 +23,5 @@ export type RootStackParamList = {
   Consent: undefined;
   PrivacyPolicy: undefined;
   TermsOfService: undefined;
+  Paywall: undefined;
 };

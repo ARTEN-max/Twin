@@ -14,6 +14,7 @@ import {
   addChatMessage,
 } from '../services/chat.service.js';
 import { getDayContext, getDayDebriefs, getRecordingContext } from '../services/context.service.js';
+import { checkAndIncrementChatCount } from '../lib/subscription.js';
 
 // ============================================
 // Request schemas
@@ -275,6 +276,18 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
   }>('/chat', async (request, reply) => {
     const { uid: userId, email } = requireUser(request);
     await ensureUserExists(userId, email);
+
+    // Subscription limit check
+    const limitCheck = await checkAndIncrementChatCount(userId);
+    if (!limitCheck.allowed) {
+      return reply.status(402).send({
+        error: 'chat_limit_reached',
+        message: `You've used all ${limitCheck.limit} chat messages for today. Upgrade to Twin Pro for unlimited chat.`,
+        used: limitCheck.used,
+        limit: limitCheck.limit,
+        tier: limitCheck.tier,
+      });
+    }
 
     const parsed = postChatBodySchema.safeParse(request.body);
     if (!parsed.success) {

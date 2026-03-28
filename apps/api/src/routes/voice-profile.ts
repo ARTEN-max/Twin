@@ -6,6 +6,7 @@ import fetch from 'node-fetch';
 import FormData from 'form-data';
 import { db } from '../lib/db.js';
 import type { FirebaseUser } from '../plugins/firebase-auth.js';
+import { getTierLimits } from '../lib/subscription.js';
 
 function requireUser(request: { firebaseUser?: FirebaseUser | null }): FirebaseUser {
   const user = request.firebaseUser;
@@ -30,6 +31,24 @@ export const voiceProfileRoutes: FastifyPluginAsync = async (fastify) => {
     try {
       const { uid: userId } = requireUser(request);
 
+      // Check if free user already has a voice profile (re-enrollment is Pro-only)
+      const existingUser = await db.user.findUnique({
+        where: { id: userId },
+        select: { hasVoiceProfile: true, subscriptionTier: true },
+      });
+      if (existingUser?.hasVoiceProfile) {
+        const limits = getTierLimits(existingUser.subscriptionTier);
+        // Free tier: only 1 enrollment allowed. Re-enrollment requires Pro.
+        if (limits.recordingsPerMonth !== null) {
+          return reply.code(402).send({
+            error: 'pro_required',
+            message:
+              'Re-enrolling your voice profile requires Twin Pro. Upgrade to update your voice.',
+            tier: existingUser.subscriptionTier,
+          });
+        }
+      }
+
       // Get uploaded file
       const data = await request.file();
       if (!data) {
@@ -48,7 +67,9 @@ export const voiceProfileRoutes: FastifyPluginAsync = async (fastify) => {
 
         // Extract speaker embedding using diarization service
         if (!DIARIZATION_SERVICE_URL) {
-          throw new Error('Voice profile enrollment is not available. The diarization service is not configured. Please set DIARIZATION_SERVICE_URL environment variable.');
+          throw new Error(
+            'Voice profile enrollment is not available. The diarization service is not configured. Please set DIARIZATION_SERVICE_URL environment variable.'
+          );
         }
 
         console.log(`👤 Extracting voice embedding for user ${userId}`);
@@ -87,7 +108,9 @@ export const voiceProfileRoutes: FastifyPluginAsync = async (fastify) => {
         const contentType = response.headers.get('content-type') || '';
         if (!contentType.includes('application/json')) {
           const text = await response.text();
-          throw new Error(`Diarization service returned non-JSON response: ${text.substring(0, 100)}`);
+          throw new Error(
+            `Diarization service returned non-JSON response: ${text.substring(0, 100)}`
+          );
         }
 
         const result = (await response.json()) as { embedding: number[] };
@@ -132,7 +155,7 @@ export const voiceProfileRoutes: FastifyPluginAsync = async (fastify) => {
 
   // DELETE /api/voice-profile
   // Remove user's voice profile
-  fastify.delete('/api/voice-profile', async (request, reply) => {
+  fastify.delete('/api/voice-profile', async (request, _reply) => {
     const { uid: userId } = requireUser(request);
 
     // Use updateMany to avoid error if user doesn't exist
@@ -152,7 +175,7 @@ export const voiceProfileRoutes: FastifyPluginAsync = async (fastify) => {
 
   // GET /api/voice-profile/status
   // Check if user has a voice profile
-  fastify.get('/api/voice-profile/status', async (request, reply) => {
+  fastify.get('/api/voice-profile/status', async (request, _reply) => {
     const { uid: userId } = requireUser(request);
 
     const user = await db.user.findUnique({
