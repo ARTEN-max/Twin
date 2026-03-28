@@ -13,10 +13,11 @@
     },
     "assetBundlePatterns": ["**/*"],
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.komuchi.mobile",
+      "buildNumber": "1",
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "This app needs access to your microphone to record audio for transcription and debrief generation.",
+        "NSMicrophoneUsageDescription": "Twin needs access to your microphone to record audio for transcription and debrief generation.",
         "UIBackgroundModes": ["audio"]
       }
     },
