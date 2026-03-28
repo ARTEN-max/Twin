@@ -1,23 +1,26 @@
+/* global process */
 /**
  * TermsOfServiceScreen
- * 
- * In-app Terms of Service page.
+ *
+ * Loads the live terms of service URL in a WebView so updates
+ * are always reflected without a new app release.
  */
 
-import React from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-} from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { WebView } from 'react-native-webview';
+
+const TERMS_URL =
+  process.env.EXPO_PUBLIC_TERMS_URL || 'https://twin-a-i.github.io/twin/terms-of-service.html';
 
 interface TermsOfServiceScreenProps {
   onBack: () => void;
 }
 
 export default function TermsOfServiceScreen({ onBack }: TermsOfServiceScreenProps) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -28,99 +31,28 @@ export default function TermsOfServiceScreen({ onBack }: TermsOfServiceScreenPro
         <View style={styles.headerSpacer} />
       </View>
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
-        <Text style={styles.title}>Terms of Service (Twin)</Text>
-        <Text style={styles.lastUpdated}>Last updated: {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</Text>
+      {loading && !error && (
+        <View style={styles.loadingOverlay}>
+          <ActivityIndicator size="large" color="#0ff" />
+        </View>
+      )}
 
-        <Text style={styles.body}>
-          These Terms of Service ("Terms") govern your use of Twin (the "Service"). By using the Service, you agree to these Terms.
-        </Text>
-
-        <Text style={styles.sectionTitle}>1. Eligibility</Text>
-        <Text style={styles.body}>
-          You must be at least 13 years old to use Twin. If you are under the age of majority where you live, you must have permission from a parent/guardian.
-        </Text>
-
-        <Text style={styles.sectionTitle}>2. Your account</Text>
-        <Text style={styles.body}>
-          You are responsible for:{'\n'}
-          • Maintaining the confidentiality of your login credentials{'\n'}
-          • All activity on your account
-        </Text>
-
-        <Text style={styles.sectionTitle}>3. Recording and legal compliance</Text>
-        <Text style={styles.body}>
-          Twin provides tools to record and process audio you choose to record. You agree that you will:{'\n'}
-          • Only record with permission from participants where required by law{'\n'}
-          • Use Twin in compliance with applicable laws and regulations
-        </Text>
-        <Text style={styles.body}>
-          Twin is not responsible for how you use the recording feature.
-        </Text>
-
-        <Text style={styles.sectionTitle}>4. Acceptable use</Text>
-        <Text style={styles.body}>
-          You agree not to:{'\n'}
-          • Use Twin for unlawful, harmful, or abusive purposes{'\n'}
-          • Upload content that violates others' rights (privacy, intellectual property, etc.){'\n'}
-          • Attempt to reverse engineer or disrupt the Service{'\n'}
-          • Use the Service to harvest data or compromise security
-        </Text>
-
-        <Text style={styles.sectionTitle}>5. AI outputs</Text>
-        <Text style={styles.body}>
-          Twin may generate transcripts, summaries, and suggestions using automated systems. Outputs may be inaccurate or incomplete. You are responsible for how you use any generated output.
-        </Text>
-        <Text style={styles.body}>
-          Twin does not provide legal, medical, or professional advice.
-        </Text>
-
-        <Text style={styles.sectionTitle}>6. Content ownership</Text>
-        <Text style={styles.body}>
-          You retain your rights to your original content (your recordings).
-        </Text>
-        <Text style={styles.body}>
-          You grant Twin a limited license to process your content to provide the Service (transcription, diarization, summaries, chat).
-        </Text>
-        <Text style={styles.body}>
-          You can delete your recordings in the app. You can delete your account in the app.
-        </Text>
-
-        <Text style={styles.sectionTitle}>7. Service availability</Text>
-        <Text style={styles.body}>
-          We may change, suspend, or discontinue parts of the Service at any time. We aim to keep the Service available but do not guarantee uninterrupted access.
-        </Text>
-
-        <Text style={styles.sectionTitle}>8. Payments (if applicable)</Text>
-        <Text style={styles.body}>
-          If Twin offers paid features, pricing and billing terms will be shown at the point of purchase. Purchases made in the iOS app are handled through Apple's in-app purchase system.
-        </Text>
-
-        <Text style={styles.sectionTitle}>9. Disclaimers</Text>
-        <Text style={styles.body}>
-          The Service is provided "as is" without warranties of any kind. We do not guarantee that the Service will be error-free or that outputs will be accurate.
-        </Text>
-
-        <Text style={styles.sectionTitle}>10. Limitation of liability</Text>
-        <Text style={styles.body}>
-          To the maximum extent allowed by law, Twin will not be liable for indirect, incidental, special, or consequential damages arising from your use of the Service.
-        </Text>
-
-        <Text style={styles.sectionTitle}>11. Termination</Text>
-        <Text style={styles.body}>
-          You may stop using the Service at any time. You may delete your account in-app. We may suspend or terminate access if you violate these Terms.
-        </Text>
-
-        <Text style={styles.sectionTitle}>12. Changes</Text>
-        <Text style={styles.body}>
-          We may update these Terms from time to time. We will update the "Last updated" date when changes occur.
-        </Text>
-
-        <Text style={styles.sectionTitle}>13. Contact</Text>
-        <Text style={styles.body}>
-          Support: {process.env.EXPO_PUBLIC_SUPPORT_EMAIL || '[support@yourdomain.com]'}
-        </Text>
-      </ScrollView>
+      {error ? (
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>Could not load Terms of Service.</Text>
+          <Text style={styles.errorSub}>Check your connection and try again.</Text>
+        </View>
+      ) : (
+        <WebView
+          source={{ uri: TERMS_URL }}
+          style={styles.webview}
+          onLoadEnd={() => setLoading(false)}
+          onError={() => {
+            setLoading(false);
+            setError(true);
+          }}
+        />
+      )}
     </View>
   );
 }
@@ -155,42 +87,32 @@ const styles = StyleSheet.create({
   headerSpacer: {
     width: 60,
   },
-  scroll: {
+  webview: {
     flex: 1,
+    backgroundColor: '#fff',
   },
-  content: {
-    padding: 20,
-    paddingBottom: 40,
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    top: 100,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#000',
+    zIndex: 1,
   },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 32,
+  },
+  errorText: {
     color: '#fff',
-    marginBottom: 8,
-  },
-  lastUpdated: {
-    fontSize: 14,
-    color: '#888',
-    marginBottom: 24,
-  },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#fff',
-    marginTop: 24,
-    marginBottom: 12,
-  },
-  body: {
     fontSize: 16,
-    color: '#ccc',
-    lineHeight: 24,
-    marginBottom: 16,
-  },
-  subsectionTitle: {
-    fontSize: 17,
     fontWeight: '600',
-    color: '#fff',
-    marginTop: 12,
     marginBottom: 8,
+  },
+  errorSub: {
+    color: '#888',
+    fontSize: 14,
   },
 });
