@@ -42,7 +42,7 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
   const checkEntitlement = useCallback(async () => {
     try {
       const info = await Purchases.getCustomerInfo();
-      const active = info.entitlements.active['pro'];
+      const active = info.entitlements.active['Twin Pro'];
       setIsPro(!!active);
     } catch (err) {
       console.warn('RevenueCat entitlement check failed:', err);
@@ -98,7 +98,7 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
   const purchase = useCallback(async (pkg: PurchasesPackage): Promise<boolean> => {
     try {
       const { customerInfo } = await Purchases.purchasePackage(pkg);
-      const active = customerInfo.entitlements.active['pro'];
+      const active = customerInfo.entitlements.active['Twin Pro'];
       setIsPro(!!active);
       return !!active;
     } catch (err: unknown) {
@@ -112,7 +112,7 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
   const restore = useCallback(async (): Promise<boolean> => {
     try {
       const info = await Purchases.restorePurchases();
-      const active = info.entitlements.active['pro'];
+      const active = info.entitlements.active['Twin Pro'];
       setIsPro(!!active);
       return !!active;
     } catch (err) {
