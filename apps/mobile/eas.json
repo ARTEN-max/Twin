@@ -5,10 +5,12 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "pnpm": "9.15.0"
     },
     "preview": {
       "distribution": "internal",
+      "pnpm": "9.15.0",
       "ios": {
         "simulator": false
       },
@@ -17,14 +19,16 @@
         "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyBNkV5nB_CjBgXgS0ikjpFzwbrAjAGiT7g",
         "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "twin-5fd4e.firebaseapp.com",
         "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "twin-5fd4e",
-        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:876481464585:ios:6131d7b39b660055e86bd8",
+        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:876481464585:ios:b0ec86b1d5690f01e86bd8",
+        "EXPO_PUBLIC_REVENUECAT_API_KEY": "appl_gMRnuQcvaucNSvIsdVnawnhkpXj",
         "EXPO_PUBLIC_SUPPORT_EMAIL": "ar362952@gmail.com",
-        "EXPO_PUBLIC_PRIVACY_POLICY_URL": "https://twin-a-i.github.io/twin/privacy-policy.html",
-        "EXPO_PUBLIC_TERMS_URL": "https://twin-a-i.github.io/twin/terms-of-service.html"
+        "EXPO_PUBLIC_PRIVACY_POLICY_URL": "https://twin-a-i.github.io/Twin/apps/mobile/legal/privacy-policy.html",
+        "EXPO_PUBLIC_TERMS_URL": "https://twin-a-i.github.io/Twin/apps/mobile/legal/terms-of-service.html"
       }
     },
     "production": {
       "distribution": "store",
+      "pnpm": "9.15.0",
       "ios": {
         "simulator": false
       },
@@ -33,10 +37,11 @@
         "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyBNkV5nB_CjBgXgS0ikjpFzwbrAjAGiT7g",
         "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "twin-5fd4e.firebaseapp.com",
         "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "twin-5fd4e",
-        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:876481464585:ios:6131d7b39b660055e86bd8",
+        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:876481464585:ios:b0ec86b1d5690f01e86bd8",
+        "EXPO_PUBLIC_REVENUECAT_API_KEY": "appl_gMRnuQcvaucNSvIsdVnawnhkpXj",
         "EXPO_PUBLIC_SUPPORT_EMAIL": "ar362952@gmail.com",
-        "EXPO_PUBLIC_PRIVACY_POLICY_URL": "https://twin-a-i.github.io/twin/privacy-policy.html",
-        "EXPO_PUBLIC_TERMS_URL": "https://twin-a-i.github.io/twin/terms-of-service.html"
+        "EXPO_PUBLIC_PRIVACY_POLICY_URL": "https://twin-a-i.github.io/Twin/apps/mobile/legal/privacy-policy.html",
+        "EXPO_PUBLIC_TERMS_URL": "https://twin-a-i.github.io/Twin/apps/mobile/legal/terms-of-service.html"
       }
     }
   },
