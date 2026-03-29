@@ -11,6 +11,7 @@ export default [
     ignores: [
       '**/node_modules/**',
       '**/dist/**',
+      '**/vendor-shared/**',
       '**/.next/**',
       '**/build/**',
       '**/.turbo/**',
