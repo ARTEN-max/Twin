@@ -14,11 +14,12 @@
     "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.komuchi.mobile",
+      "bundleIdentifier": "com.twinai.mobile",
       "buildNumber": "1",
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Twin needs access to your microphone to record audio for transcription and debrief generation.",
-        "UIBackgroundModes": ["audio"]
+        "UIBackgroundModes": ["audio", "audio"],
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -26,8 +27,11 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#000000"
       },
-      "permissions": ["android.permission.RECORD_AUDIO"],
-      "package": "com.komuchi.mobile"
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ],
+      "package": "com.twinai.mobile"
     },
     "web": {
       "favicon": "./assets/favicon.png",
@@ -43,7 +47,7 @@
     ],
     "extra": {
       "eas": {
-        "projectId": ""
+        "projectId": "93a39f3c-bb57-469c-af3e-d87bf9c017f0"
       },
       "EXPO_PUBLIC_API_BASE_URL": "https://twin-production-a0e4.up.railway.app",
       "EXPO_PUBLIC_FIREBASE_API_KEY": "",
@@ -53,6 +57,7 @@
       "EXPO_PUBLIC_PRIVACY_POLICY_URL": "",
       "EXPO_PUBLIC_TERMS_URL": "",
       "EXPO_PUBLIC_SUPPORT_EMAIL": ""
-    }
+    },
+    "owner": "arlnu"
   }
 }
