@@ -4,15 +4,30 @@ const path = require('path');
 const fs = require('fs');
 
 // Find the project and workspace directories
-const projectRoot = __dirname;
-const monorepoRoot = path.resolve(projectRoot, '../..');
+// Use realpathSync to resolve any symlinks EAS may create in the build environment
+const projectRoot = fs.realpathSync(__dirname);
+
+// Walk up from projectRoot until we find the monorepo root (has packages/shared)
+function findMonorepoRoot(startDir) {
+  let dir = startDir;
+  while (dir !== path.dirname(dir)) {
+    if (fs.existsSync(path.join(dir, 'packages', 'shared'))) {
+      return dir;
+    }
+    dir = path.dirname(dir);
+  }
+  // Fallback: assume 2 levels up
+  return path.resolve(startDir, '../..');
+}
+
+const monorepoRoot = findMonorepoRoot(projectRoot);
 const sharedPackagePath = path.resolve(monorepoRoot, 'packages/shared');
 const sharedDistPath = path.resolve(sharedPackagePath, 'dist');
 
 const config = getDefaultConfig(projectRoot);
 
-// 1. Watch only the shared dist folder needed by the custom resolver
-config.watchFolders = [sharedDistPath];
+// 1. Watch the shared dist folder if it exists (gracefully skip if path is wrong in CI)
+config.watchFolders = fs.existsSync(sharedDistPath) ? [sharedDistPath] : [];
 
 // 2. Block Metro from accessing packages/shared/src - force it to use dist only
 config.resolver.blockList = [
