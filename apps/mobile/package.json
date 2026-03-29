@@ -2,7 +2,6 @@
   "name": "@komuchi/mobile",
   "version": "0.0.1",
   "private": true,
-  "packageManager": "pnpm@9.15.0",
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
