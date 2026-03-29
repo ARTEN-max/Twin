@@ -23,18 +23,14 @@ const getBaseUrl = (): string => {
   // Expo bakes EXPO_PUBLIC_ variables from app.json into process.env at build time
   // This is the recommended way and avoids module resolution issues
   if (typeof process !== 'undefined') {
-    // @ts-expect-error - process.env not typed in this tsconfig
     if (process.env?.EXPO_PUBLIC_API_BASE_URL) {
-      // @ts-expect-error - process.env not typed in this tsconfig
       const url = process.env.EXPO_PUBLIC_API_BASE_URL;
       if (typeof console !== 'undefined' && console.log) {
         console.log('[API Client] Using API URL from process.env:', url);
       }
       return url;
     }
-    // @ts-expect-error - process.env not typed in this tsconfig
     if (process.env?.NEXT_PUBLIC_API_URL) {
-      // @ts-expect-error - process.env not typed in this tsconfig
       const url = process.env.NEXT_PUBLIC_API_URL;
       if (typeof console !== 'undefined' && console.log) {
         console.log('[API Client] Using API URL from NEXT_PUBLIC_API_URL:', url);
