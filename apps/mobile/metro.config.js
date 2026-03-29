@@ -11,8 +11,8 @@ const sharedDistPath = path.resolve(sharedPackagePath, 'dist');
 
 const config = getDefaultConfig(projectRoot);
 
-// 1. Watch all files in the monorepo
-config.watchFolders = [monorepoRoot];
+// 1. Watch only the shared dist folder needed by the custom resolver
+config.watchFolders = [sharedDistPath];
 
 // 2. Block Metro from accessing packages/shared/src - force it to use dist only
 config.resolver.blockList = [
