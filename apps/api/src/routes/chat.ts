@@ -13,7 +13,12 @@ import {
   getChatSessionByRecording,
   addChatMessage,
 } from '../services/chat.service.js';
-import { getDayContext, getDayDebriefs, getRecordingContext } from '../services/context.service.js';
+import {
+  getDayContext,
+  getDayDebriefs,
+  getRecordingContext,
+  getRecentDebriefs,
+} from '../services/context.service.js';
 import { checkAndIncrementChatCount } from '../lib/subscription.js';
 
 // ============================================
@@ -338,10 +343,17 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
         ? `${CHAT_SYSTEM_PROMPT_RECORDING}\n\n## Transcript for this recording\n\n${context}`
         : CHAT_SYSTEM_PROMPT_RECORDING + '\n\n(No transcript for this recording yet.)';
     } else {
-      const { context, hasContent } = await getDayContext({ userId, date });
-      systemContent = hasContent
-        ? `${CHAT_SYSTEM_PROMPT_DAY}\n\n## Transcripts from this day\n\n${context}`
-        : CHAT_SYSTEM_PROMPT_DAY + '\n\n(No transcripts for this day yet.)';
+      const [{ context, hasContent }, recentHistory] = await Promise.all([
+        getDayContext({ userId, date }),
+        getRecentDebriefs(userId, date),
+      ]);
+      systemContent = CHAT_SYSTEM_PROMPT_DAY;
+      if (recentHistory) {
+        systemContent += `\n\n## Your history (last 7 days)\n\n${recentHistory}`;
+      }
+      systemContent += hasContent
+        ? `\n\n## Transcripts from today\n\n${context}`
+        : '\n\n(No transcripts for this day yet.)';
     }
 
     const openai = createOpenAI({ apiKey: env.OPENAI_API_KEY });
@@ -385,7 +397,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
         system: systemContent,
         messages: modelMessages,
         temperature: 0.5,
-        maxTokens: 2048,
+        maxOutputTokens: 2048,
       });
 
       // generateText returns { text: string } directly - no Promise wrapping

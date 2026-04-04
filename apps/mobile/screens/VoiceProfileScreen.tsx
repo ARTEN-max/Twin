@@ -432,11 +432,7 @@ export default function VoiceProfileScreen({ onBack, onPaywall }: VoiceProfileSc
         }
       } catch {
         throw new Error(
-          `Cannot reach API server at ${baseUrl}.\n\n` +
-            `Please check:\n` +
-            `1. API server is running (test: curl ${baseUrl}/api/health)\n` +
-            `2. Device and server are on the same network\n` +
-            `3. Correct IP in app.json extra.EXPO_PUBLIC_API_BASE_URL`
+          'Unable to reach the server. Please check your internet connection and try again.'
         );
       }
 
@@ -480,16 +476,14 @@ export default function VoiceProfileScreen({ onBack, onPaywall }: VoiceProfileSc
         clearTimeout(timeoutId);
         abortControllerRef.current = null;
         if (fetchError.name === 'AbortError') {
-          throw new Error(
-            'Upload cancelled or timed out.\n\nIf this keeps happening, the diarization service may not be running.\nStart it with: docker compose up diarization -d'
-          );
+          throw new Error('Upload timed out. Please try again.');
         }
         if (
           fetchError.message?.includes('Network request failed') ||
           fetchError.message?.includes('Failed to connect')
         ) {
           throw new Error(
-            `Cannot connect to API server.\n\nPlease check:\n1. API server is running (${baseUrl})\n2. Device and computer are on the same network\n3. Firewall allows connections\n4. Diarization service is running (port 8001)`
+            'Connection failed. Please check your internet connection and try again.'
           );
         }
         throw fetchError;

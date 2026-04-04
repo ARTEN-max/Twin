@@ -1,6 +1,7 @@
+/* global console */
 /**
  * RecordingsScreen
- * 
+ *
  * Displays a list of recordings for a selected date.
  * Features:
  * - Date picker (defaults to today)
@@ -20,8 +21,27 @@ import {
   RefreshControl,
   ActivityIndicator,
 } from 'react-native';
-import { listRecordings, type RecordingSummary, toRecordingSummary, ApiClientError } from '@komuchi/shared';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  listRecordings,
+  type RecordingSummary,
+  toRecordingSummary,
+  ApiClientError,
+} from '@komuchi/shared';
 import { useAuth } from '../contexts/AuthContext';
+import { theme } from '../theme';
+
+const DATE_KEY = 'twin:selected_date';
+
+function todayString(): string {
+  return new Date().toISOString().split('T')[0];
+}
+
+function offsetDate(dateStr: string, days: number): string {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  return d.toISOString().split('T')[0];
+}
 
 interface RecordingsScreenProps {
   onSelectRecording: (recordingId: string) => void;
@@ -31,17 +51,33 @@ interface RecordingsScreenProps {
   onMount?: (refreshFn: () => void) => void;
 }
 
-export default function RecordingsScreen({ onSelectRecording, onNewRecording, onVoiceProfile, onSettings, onMount }: RecordingsScreenProps) {
+export default function RecordingsScreen({
+  onSelectRecording,
+  onNewRecording,
+  onVoiceProfile,
+  onSettings,
+  onMount,
+}: RecordingsScreenProps) {
   const { user } = useAuth();
   const [recordings, setRecordings] = useState<RecordingSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedDate, setSelectedDate] = useState<string>(() => {
-    // Default to today in YYYY-MM-DD format
-    const today = new Date();
-    return today.toISOString().split('T')[0];
-  });
+  const [selectedDate, setSelectedDate] = useState<string>(todayString);
+
+  // Restore last-viewed date on mount, but never a future date
+  useEffect(() => {
+    AsyncStorage.getItem(DATE_KEY).then((saved) => {
+      if (saved && saved <= todayString()) {
+        setSelectedDate(saved);
+      }
+    });
+  }, []);
+
+  const changeDate = useCallback((newDate: string) => {
+    setSelectedDate(newDate);
+    AsyncStorage.setItem(DATE_KEY, newDate);
+  }, []);
 
   const loadRecordings = useCallback(async (date: string, showRefreshing = false) => {
     try {
@@ -69,11 +105,12 @@ export default function RecordingsScreen({ onSelectRecording, onNewRecording, on
       setRecordings(summaries);
     } catch (err) {
       console.error('Error loading recordings:', err);
-      const errorMessage = err instanceof ApiClientError
-        ? `API Error: ${err.message} (${err.statusCode})`
-        : err instanceof Error
-        ? err.message
-        : 'Failed to load recordings';
+      const errorMessage =
+        err instanceof ApiClientError
+          ? `API Error: ${err.message} (${err.statusCode})`
+          : err instanceof Error
+            ? err.message
+            : 'Failed to load recordings';
       setError(errorMessage);
     } finally {
       setLoading(false);
@@ -136,16 +173,28 @@ export default function RecordingsScreen({ onSelectRecording, onNewRecording, on
   const getStatusColor = (status: string): string => {
     switch (status) {
       case 'complete':
-        return '#0f0';
+        return theme.success;
       case 'processing':
-        return '#ff0';
+        return theme.warning;
       case 'failed':
-        return '#f00';
-      case 'pending':
-      case 'uploaded':
-        return '#888';
+        return theme.error;
       default:
-        return '#888';
+        return theme.textMuted;
+    }
+  };
+
+  const getStatusLabel = (status: string): string => {
+    switch (status) {
+      case 'complete':
+        return 'done';
+      case 'processing':
+        return 'processing';
+      case 'failed':
+        return 'failed';
+      case 'uploaded':
+        return 'queued';
+      default:
+        return status;
     }
   };
 
@@ -153,44 +202,59 @@ export default function RecordingsScreen({ onSelectRecording, onNewRecording, on
     <TouchableOpacity
       style={styles.recordingItem}
       onPress={() => onSelectRecording(item.id)}
+      activeOpacity={0.75}
     >
+      {/* Left accent bar */}
+      <View style={[styles.recordingAccentBar, { backgroundColor: getStatusColor(item.status) }]} />
       <View style={styles.recordingItemContent}>
+        {/* Top row: time + status */}
         <View style={styles.recordingItemHeader}>
           <Text style={styles.recordingTime}>{formatTime(item.createdAt)}</Text>
-          <View style={[styles.statusPill, { backgroundColor: getStatusColor(item.status) }]}>
-            <Text style={styles.statusText}>{item.status}</Text>
+          <View style={styles.statusRow}>
+            <View style={[styles.statusDot, { backgroundColor: getStatusColor(item.status) }]} />
+            <Text style={[styles.statusLabel, { color: getStatusColor(item.status) }]}>
+              {getStatusLabel(item.status)}
+            </Text>
           </View>
         </View>
+
+        {/* Title */}
+        <Text style={styles.recordingTitle} numberOfLines={1}>
+          {item.title || 'Untitled recording'}
+        </Text>
+
+        {/* Meta row: duration + badges */}
         <View style={styles.recordingItemMeta}>
           <Text style={styles.recordingDuration}>{formatDuration(item.durationSec)}</Text>
-          {item.title && (
-            <Text style={styles.recordingTitle} numberOfLines={1}>
-              {item.title}
-            </Text>
+          {item.hasTranscript && (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>Transcript</Text>
+            </View>
           )}
-          <View style={styles.recordingBadges}>
-            {item.hasTranscript && (
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>Transcript</Text>
-              </View>
-            )}
-            {item.hasDebrief && (
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>Debrief</Text>
-              </View>
-            )}
-          </View>
+          {item.hasDebrief && (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>Debrief</Text>
+            </View>
+          )}
         </View>
       </View>
       <Text style={styles.chevron}>›</Text>
+      <View style={{ width: 6 }} />
     </TouchableOpacity>
   );
 
   const renderEmptyState = () => (
     <View style={styles.emptyState}>
+      <View style={styles.emptyWaveform}>
+        {[14, 8, 20, 12, 24, 10, 18, 6, 16].map((h, i) => (
+          <View key={i} style={[styles.emptyWaveBar, { height: h }]} />
+        ))}
+      </View>
       <Text style={styles.emptyStateTitle}>No recordings yet</Text>
       <Text style={styles.emptyStateText}>
-        Recordings for {formatDate(selectedDate)} will appear here
+        {formatDate(selectedDate) === 'Today'
+          ? 'Tap + to capture your first recording today'
+          : `No recordings for ${formatDate(selectedDate)}`}
       </Text>
     </View>
   );
@@ -199,10 +263,19 @@ export default function RecordingsScreen({ onSelectRecording, onNewRecording, on
     return (
       <View style={styles.container}>
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>{formatDate(selectedDate)}</Text>
+          <View style={styles.dateLabelWrap}>
+            <Text style={styles.headerTitle}>{formatDate(selectedDate)}</Text>
+            <Text style={styles.headerDate}>
+              {new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-US', {
+                weekday: 'long',
+                month: 'long',
+                day: 'numeric',
+              })}
+            </Text>
+          </View>
         </View>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#0ff" />
+          <ActivityIndicator size="large" color={theme.accent} />
         </View>
       </View>
     );
@@ -211,32 +284,67 @@ export default function RecordingsScreen({ onSelectRecording, onNewRecording, on
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>{formatDate(selectedDate)}</Text>
+        <View style={styles.dateNav}>
+          <TouchableOpacity
+            style={styles.navArrow}
+            onPress={() => changeDate(offsetDate(selectedDate, -1))}
+            accessibilityLabel="Previous day"
+          >
+            <Text style={styles.navArrowText}>‹</Text>
+          </TouchableOpacity>
+          <View style={styles.dateLabelWrap}>
+            <Text style={styles.headerTitle}>{formatDate(selectedDate)}</Text>
+            <Text style={styles.headerDate}>
+              {new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-US', {
+                weekday: 'long',
+                month: 'long',
+                day: 'numeric',
+              })}
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={[styles.navArrow, selectedDate >= todayString() && styles.navArrowDisabled]}
+            onPress={() => {
+              if (selectedDate < todayString()) changeDate(offsetDate(selectedDate, 1));
+            }}
+            accessibilityLabel="Next day"
+            disabled={selectedDate >= todayString()}
+          >
+            <Text
+              style={[
+                styles.navArrowText,
+                selectedDate >= todayString() && styles.navArrowTextDisabled,
+              ]}
+            >
+              ›
+            </Text>
+          </TouchableOpacity>
+        </View>
         <View style={styles.headerButtons}>
           {onSettings && (
             <TouchableOpacity
-              style={styles.voiceProfileButton}
+              style={styles.iconButton}
               onPress={onSettings}
               accessibilityLabel="Settings"
             >
-              <Text style={styles.voiceProfileButtonText}>⚙️</Text>
+              <Text style={styles.iconButtonText}>⚙</Text>
             </TouchableOpacity>
           )}
           {onVoiceProfile && (
             <TouchableOpacity
-              style={styles.voiceProfileButton}
+              style={styles.iconButton}
               onPress={onVoiceProfile}
               accessibilityLabel="Voice Profile"
             >
-              <Text style={styles.voiceProfileButtonText}>🎤</Text>
+              <Text style={styles.iconButtonText}>🎙</Text>
             </TouchableOpacity>
           )}
           <TouchableOpacity
-            style={styles.recordButton}
+            style={styles.newButton}
             onPress={onNewRecording}
             accessibilityLabel="New Recording"
           >
-            <Text style={styles.recordButtonText}>+</Text>
+            <Text style={styles.newButtonText}>+</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -256,7 +364,7 @@ export default function RecordingsScreen({ onSelectRecording, onNewRecording, on
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              tintColor="#0ff"
+              tintColor={theme.accent}
             />
           }
         />
@@ -268,55 +376,86 @@ export default function RecordingsScreen({ onSelectRecording, onNewRecording, on
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: theme.bg,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 20,
+    paddingHorizontal: 12,
     paddingTop: 60,
-    backgroundColor: '#1a1a1a',
+    paddingBottom: 16,
+    backgroundColor: theme.surface,
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomColor: theme.border,
+  },
+  dateNav: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  dateLabelWrap: {
+    flex: 1,
+  },
+  navArrow: {
+    width: 32,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  navArrowDisabled: {
+    opacity: 0.25,
+  },
+  navArrowText: {
+    fontSize: 28,
+    color: theme.textPrimary,
+    lineHeight: 32,
+  },
+  navArrowTextDisabled: {
+    color: theme.textMuted,
   },
   headerTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#fff',
-    flex: 1,
+    fontFamily: theme.fontDisplay,
+    fontSize: 30,
+    color: theme.textPrimary,
+  },
+  headerDate: {
+    fontFamily: theme.fontMono,
+    fontSize: 11,
+    color: theme.textMuted,
+    marginTop: 2,
   },
   headerButtons: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
   },
-  voiceProfileButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#2a2a2a',
+  iconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: theme.surfaceHigh,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: '#444',
+    borderColor: theme.border,
   },
-  voiceProfileButtonText: {
-    fontSize: 20,
+  iconButtonText: {
+    fontSize: 17,
   },
-  recordButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#0ff',
+  newButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: theme.accent,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  recordButtonText: {
-    fontSize: 28,
-    color: '#000',
-    fontWeight: 'bold',
-    lineHeight: 28,
+  newButtonText: {
+    fontSize: 24,
+    color: theme.bg,
+    fontWeight: '500',
+    lineHeight: 26,
   },
   loadingContainer: {
     flex: 1,
@@ -324,14 +463,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   errorContainer: {
-    padding: 20,
-    backgroundColor: '#2a1a1a',
-    margin: 20,
-    borderRadius: 8,
+    padding: 16,
+    backgroundColor: 'rgba(192,96,96,0.1)',
+    margin: 16,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(192,96,96,0.3)',
   },
   errorText: {
-    color: '#f88',
-    fontSize: 14,
+    color: theme.error,
+    fontSize: 13,
   },
   emptyList: {
     flexGrow: 1,
@@ -342,83 +483,109 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 40,
   },
+  emptyWaveform: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 5,
+    marginBottom: 24,
+  },
+  emptyWaveBar: {
+    width: 3,
+    borderRadius: 2,
+    backgroundColor: 'rgba(201,168,76,0.2)',
+  },
   emptyStateTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#fff',
+    fontFamily: theme.fontDisplay,
+    fontSize: 22,
+    color: theme.textPrimary,
     marginBottom: 8,
   },
   emptyStateText: {
-    fontSize: 14,
-    color: '#888',
+    fontFamily: theme.fontMono,
+    fontSize: 13,
+    color: theme.textSecondary,
     textAlign: 'center',
+    lineHeight: 20,
   },
+  // Recording list item — card style
   recordingItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#222',
-    backgroundColor: '#1a1a1a',
+    marginHorizontal: 16,
+    marginTop: 10,
+    backgroundColor: theme.surface,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: theme.border,
+    overflow: 'hidden',
+  },
+  recordingAccentBar: {
+    width: 3,
+    alignSelf: 'stretch',
+    opacity: 0.7,
   },
   recordingItemContent: {
     flex: 1,
+    padding: 14,
   },
   recordingItemHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 5,
   },
   recordingTime: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
+    fontFamily: theme.fontMono,
+    fontSize: 13,
+    color: theme.textSecondary,
   },
-  statusPill: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
   },
-  statusText: {
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  statusLabel: {
+    fontFamily: theme.fontMono,
     fontSize: 11,
-    fontWeight: '600',
-    color: '#000',
-    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  recordingTitle: {
+    fontSize: 15,
+    color: theme.textPrimary,
+    fontWeight: '500',
+    marginBottom: 8,
   },
   recordingItemMeta: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
   },
   recordingDuration: {
-    fontSize: 14,
-    color: '#888',
-    fontFamily: 'monospace',
-  },
-  recordingTitle: {
-    fontSize: 14,
-    color: '#aaa',
-    flex: 1,
-  },
-  recordingBadges: {
-    flexDirection: 'row',
-    gap: 6,
+    fontFamily: theme.fontMono,
+    fontSize: 12,
+    color: theme.textSecondary,
   },
   badge: {
-    paddingHorizontal: 6,
+    paddingHorizontal: 7,
     paddingVertical: 2,
-    backgroundColor: '#2a2a2a',
+    backgroundColor: theme.accentDim,
     borderRadius: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(201,168,76,0.25)',
   },
   badgeText: {
+    fontFamily: theme.fontMono,
     fontSize: 10,
-    color: '#0ff',
-    textTransform: 'uppercase',
+    color: theme.accent,
   },
   chevron: {
-    fontSize: 24,
-    color: '#666',
-    marginLeft: 12,
+    fontSize: 20,
+    color: theme.textMuted,
+    marginLeft: 10,
   },
 });

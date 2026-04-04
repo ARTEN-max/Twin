@@ -117,6 +117,48 @@ export async function getRecordingContext(
 }
 
 /**
+ * Fetches compressed debrief context from the last N days before a given date.
+ * Used to give the chat AI cross-day pattern awareness without injecting full transcripts.
+ */
+export async function getRecentDebriefs(
+  userId: string,
+  beforeDate: string | Date,
+  days = 7
+): Promise<string> {
+  const end = toUtcDayStart(beforeDate);
+  const start = new Date(end.getTime() - days * 24 * 60 * 60 * 1000);
+
+  const recordings = await db.recording.findMany({
+    where: {
+      userId,
+      createdAt: { gte: start, lt: end },
+      status: 'complete',
+    },
+    orderBy: { createdAt: 'asc' },
+    include: { debrief: true },
+  });
+
+  const byDate = new Map<string, Array<(typeof recordings)[number]>>();
+  for (const rec of recordings) {
+    const key = rec.createdAt.toISOString().slice(0, 10);
+    if (!byDate.has(key)) byDate.set(key, []);
+    byDate.get(key)!.push(rec);
+  }
+
+  const parts: string[] = [];
+  for (const [date, recs] of [...byDate.entries()].sort((a, b) => b[0].localeCompare(a[0]))) {
+    const dayParts = recs
+      .filter((r) => r.debrief?.markdown?.trim())
+      .map((r) => `**${r.title}**\n${r.debrief!.markdown.trim()}`);
+    if (dayParts.length) {
+      parts.push(`### ${date}\n\n${dayParts.join('\n\n')}`);
+    }
+  }
+
+  return parts.join('\n\n---\n\n');
+}
+
+/**
  * Fetches all debrief markdown from a user's recordings for a given day.
  * Used to repurpose debriefs as the chat's opening message.
  */
