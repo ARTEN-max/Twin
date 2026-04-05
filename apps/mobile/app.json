@@ -14,7 +14,7 @@
     "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.abdulrahman.twinai",
+      "bundleIdentifier": "com.abdulrahman.twinaiapp",
       "buildNumber": "1",
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Twin needs access to your microphone to record audio for transcription and debrief generation.",
