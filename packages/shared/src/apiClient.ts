@@ -234,6 +234,8 @@ export interface CreateRecordingParams {
   title: string;
   mode?: 'general' | 'sales' | 'interview' | 'meeting';
   mimeType: string;
+  sessionId?: string;
+  chunkIndex?: number;
 }
 
 export interface CreateRecordingResponse {
@@ -262,7 +264,75 @@ export async function createRecording(
       title: params.title,
       mode: params.mode || 'general',
       mimeType: params.mimeType,
+      ...(params.sessionId != null && { sessionId: params.sessionId }),
+      ...(params.chunkIndex != null && { chunkIndex: params.chunkIndex }),
     }),
+  });
+}
+
+// ============================================
+// Session API
+// ============================================
+
+export interface CreateSessionResponse {
+  sessionId: string;
+  title: string;
+  status: string;
+}
+
+export interface SessionResponse {
+  sessionId: string;
+  title: string;
+  status: 'pending' | 'processing' | 'complete' | 'failed';
+  recordingCount: number;
+  completeCount: number;
+  totalDuration: number;
+  debrief: { markdown: string; sections: unknown[] } | null;
+  createdAt: string;
+}
+
+export interface TriggerSessionDebriefResponse {
+  status: 'pending' | 'processing' | 'complete';
+  message: string;
+  pendingCount?: number;
+  totalCount?: number;
+}
+
+/**
+ * Create a new recording session to group long-recording chunks
+ */
+export async function createSession(
+  userId: string,
+  title?: string
+): Promise<CreateSessionResponse> {
+  return apiRequest<CreateSessionResponse>('/api/sessions', {
+    method: 'POST',
+    headers: { 'x-user-id': userId },
+    body: JSON.stringify(title ? { title } : {}),
+  });
+}
+
+/**
+ * Get session status and debrief
+ */
+export async function getSession(userId: string, sessionId: string): Promise<SessionResponse> {
+  return apiRequest<SessionResponse>(`/api/sessions/${sessionId}`, {
+    headers: { 'x-user-id': userId },
+  });
+}
+
+/**
+ * Trigger session-level debrief generation.
+ * Returns 202 if some chunks are still processing — safe to retry.
+ */
+export async function triggerSessionDebrief(
+  userId: string,
+  sessionId: string
+): Promise<TriggerSessionDebriefResponse> {
+  return apiRequest<TriggerSessionDebriefResponse>(`/api/sessions/${sessionId}/debrief`, {
+    method: 'POST',
+    headers: { 'x-user-id': userId },
+    body: JSON.stringify({}),
   });
 }
 

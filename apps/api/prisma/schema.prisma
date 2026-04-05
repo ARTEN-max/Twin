@@ -46,6 +46,13 @@ enum ChatMessageRole {
   assistant
 }
 
+enum SessionStatus {
+  pending    // Session created, chunks being uploaded
+  processing // Session debrief is being generated
+  complete   // Session debrief ready
+  failed     // Session debrief failed
+}
+
 // ============================================
 // Models
 // ============================================
@@ -73,6 +80,7 @@ model User {
   updatedAt         DateTime      @updatedAt @map("updated_at")
   recordings        Recording[]
   chatSessions      ChatSession[]
+  sessions          Session[]
 
   @@index([email])
   @@map("users")
@@ -91,12 +99,17 @@ model Recording {
   mimeType         String?         @map("mime_type")
   fileSize         Int?            @map("file_size")
   duration         Int?            // Duration in seconds (populated after processing)
-  
+
+  // Session grouping (for long multi-chunk recordings)
+  sessionId        String?         @map("session_id")
+  chunkIndex       Int?            @map("chunk_index") // Position within the session (1-based)
+
   createdAt        DateTime        @default(now()) @map("created_at")
   updatedAt        DateTime        @updatedAt @map("updated_at")
 
   // Relations
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session      Session?     @relation(fields: [sessionId], references: [id])
   transcript   Transcript?
   debrief      Debrief?
   jobs         Job[]
@@ -106,7 +119,27 @@ model Recording {
   @@index([status])
   @@index([createdAt])
   @@index([userId, createdAt])
+  @@index([sessionId])
   @@map("recordings")
+}
+
+model Session {
+  id              String        @id @default(uuid())
+  userId          String        @map("user_id")
+  title           String
+  status          SessionStatus @default(pending)
+  debriefMarkdown String?       @map("debrief_markdown")
+  debriefSections Json?         @map("debrief_sections") @default("[]")
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recordings  Recording[]
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@index([status])
+  @@map("sessions")
 }
 
 model Transcript {

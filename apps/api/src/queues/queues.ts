@@ -13,6 +13,8 @@ import {
   type TranscriptionResult,
   type DebriefJobData,
   type DebriefResult,
+  type SessionDebriefJobData,
+  type SessionDebriefResult,
 } from './config.js';
 
 // ============================================
@@ -30,3 +32,11 @@ export const transcriptionQueue: Queue<TranscriptionJobData, TranscriptionResult
 export const debriefQueue: Queue<DebriefJobData, DebriefResult> | null = isRedisAvailable()
   ? new Queue<DebriefJobData, DebriefResult>(QUEUE_NAMES.DEBRIEF, getQueueOptions())
   : null;
+
+export const sessionDebriefQueue: Queue<SessionDebriefJobData, SessionDebriefResult> | null =
+  isRedisAvailable()
+    ? new Queue<SessionDebriefJobData, SessionDebriefResult>(
+        QUEUE_NAMES.SESSION_DEBRIEF,
+        getQueueOptions()
+      )
+    : null;

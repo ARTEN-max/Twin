@@ -13,6 +13,8 @@ export interface CreateRecordingInput {
   originalFilename?: string;
   mimeType: string;
   fileSize?: number;
+  sessionId?: string;
+  chunkIndex?: number;
 }
 
 export interface RecordingWithRelations {
@@ -79,6 +81,8 @@ export async function createRecording(data: CreateRecordingInput): Promise<Recor
       originalFilename: data.originalFilename,
       mimeType: data.mimeType,
       fileSize: data.fileSize,
+      sessionId: data.sessionId,
+      chunkIndex: data.chunkIndex,
     },
   });
 }
@@ -86,10 +90,7 @@ export async function createRecording(data: CreateRecordingInput): Promise<Recor
 /**
  * Mark recording as having received the S3 object key
  */
-export async function setRecordingObjectKey(
-  id: string,
-  objectKey: string
-): Promise<Recording> {
+export async function setRecordingObjectKey(id: string, objectKey: string): Promise<Recording> {
   return db.recording.update({
     where: { id },
     data: { objectKey },
@@ -99,10 +100,7 @@ export async function setRecordingObjectKey(
 /**
  * Mark upload as complete and change status to 'uploaded'
  */
-export async function completeUpload(
-  id: string,
-  fileSize?: number
-): Promise<Recording> {
+export async function completeUpload(id: string, fileSize?: number): Promise<Recording> {
   return db.recording.update({
     where: { id },
     data: {
@@ -249,18 +247,19 @@ export async function listRecordingsByUser(
   const where: Prisma.RecordingWhereInput = {
     userId,
     ...(status && { status }),
-    ...(date && (() => {
-      // Parse date string (YYYY-MM-DD) and create date range for that day
-      const [year, month, day] = date.split('-').map(Number);
-      const startOfDay = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
-      const endOfDay = new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999));
-      return {
-        createdAt: {
-          gte: startOfDay,
-          lte: endOfDay,
-        },
-      };
-    })()),
+    ...(date &&
+      (() => {
+        // Parse date string (YYYY-MM-DD) and create date range for that day
+        const [year, month, day] = date.split('-').map(Number);
+        const startOfDay = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+        const endOfDay = new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999));
+        return {
+          createdAt: {
+            gte: startOfDay,
+            lte: endOfDay,
+          },
+        };
+      })()),
     ...(cursor && {
       id: {
         lt: cursor, // For cursor-based pagination (assuming descending order by createdAt)
@@ -326,7 +325,9 @@ export async function saveTranscript(
 ): Promise<void> {
   await db.$transaction(async (tx) => {
     // Cast segments for Prisma JSON field
-    const segmentsData = segments as unknown as Parameters<typeof tx.transcript.create>[0]['data']['segments'];
+    const segmentsData = segments as unknown as Parameters<
+      typeof tx.transcript.create
+    >[0]['data']['segments'];
 
     // Upsert transcript
     await tx.transcript.upsert({
@@ -404,11 +405,9 @@ export async function recordingBelongsToUser(
 /**
  * Get pending recordings (for cleanup jobs)
  */
-export async function getPendingRecordings(
-  olderThanMinutes = 60
-): Promise<Recording[]> {
+export async function getPendingRecordings(olderThanMinutes = 60): Promise<Recording[]> {
   const cutoff = new Date(Date.now() - olderThanMinutes * 60 * 1000);
-  
+
   return db.recording.findMany({
     where: {
       status: 'pending',

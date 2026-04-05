@@ -36,6 +36,8 @@ const createRecordingSchema = z.object({
   title: z.string().min(1).max(255),
   mode: RecordingMode.default('general'),
   mimeType: z.string().min(1),
+  sessionId: z.string().uuid().optional(),
+  chunkIndex: z.number().int().positive().optional(),
 });
 
 // ============================================
@@ -154,7 +156,7 @@ export const recordingsRoutes: FastifyPluginAsync = async (app) => {
       });
     }
 
-    const { title, mode, mimeType: rawMimeType } = parseResult.data;
+    const { title, mode, mimeType: rawMimeType, sessionId, chunkIndex } = parseResult.data;
     const mimeType = normalizeMimeType(rawMimeType);
 
     // Validate MIME type
@@ -184,6 +186,8 @@ export const recordingsRoutes: FastifyPluginAsync = async (app) => {
         mode,
         originalFilename: filename,
         mimeType,
+        sessionId,
+        chunkIndex,
       });
 
       // 2. Generate presigned upload URL

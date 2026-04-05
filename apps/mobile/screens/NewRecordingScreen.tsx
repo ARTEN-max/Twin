@@ -35,6 +35,8 @@ import {
   getRecordingStatus,
   retryTranscription,
   getMe,
+  createSession,
+  triggerSessionDebrief,
   ApiClientError,
 } from '@komuchi/shared';
 import { useAuth } from '../contexts/AuthContext';
@@ -43,6 +45,9 @@ import { useConsent } from '../contexts/ConsentContext';
 const MIC_EXPLAINED_KEY = 'twin_mic_permission_explained';
 const STALE_RECORDING_KEY = 'twin:stale_recording';
 const KEEP_AWAKE_TAG = 'twin-recording';
+// Chunk duration: rotate every 60 s so iOS can only kill the last chunk (max 60 s loss)
+// The JS thread is killed ~2.5 min after manual phone lock even with background audio mode.
+const CHUNK_DURATION_MS = 60 * 1000;
 
 type RecordingState =
   | 'idle'
@@ -85,6 +90,10 @@ export default function NewRecordingScreen({
   const pollCancelledRef = useRef(false);
   const recordingRef = useRef<Audio.Recording | null>(null); // For use in callbacks without stale closure
   const recordingStartTimeRef = useRef<number>(0); // Wall-clock start time for accurate timer
+  const chunkTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null); // Auto-chunk timer
+  const chunkIndexRef = useRef(0); // Which chunk we're about to start (increments per rotation)
+  const sessionStartTimeRef = useRef(''); // Time label for chunk upload titles
+  const sessionIdRef = useRef<string | null>(null); // Created on first chunk rotation; null for short recordings
 
   // Animations
   const pulseScale = useRef(new Animated.Value(1)).current;
@@ -253,6 +262,10 @@ export default function NewRecordingScreen({
         clearTimeout(durationTimeoutRef.current);
         durationTimeoutRef.current = null;
       }
+      if (chunkTimeoutRef.current) {
+        clearTimeout(chunkTimeoutRef.current);
+        chunkTimeoutRef.current = null;
+      }
       deactivateKeepAwake(KEEP_AWAKE_TAG);
       if (recordingRef.current) {
         recordingRef.current.stopAndUnloadAsync().catch(() => {});
@@ -420,6 +433,12 @@ export default function NewRecordingScreen({
       }
 
       setState('recording');
+
+      // Start auto-chunking so each segment is uploaded before iOS can kill the JS thread
+      sessionStartTimeRef.current = new Date().toLocaleTimeString();
+      sessionIdRef.current = null; // session is created lazily on first chunk rotation
+      chunkIndexRef.current = 1; // chunk 1 will be uploaded after the first rotation
+      chunkTimeoutRef.current = setTimeout(autoChunk, CHUNK_DURATION_MS);
     } catch (err) {
       console.error('Error starting recording:', err);
       setError(err instanceof Error ? err.message : 'Failed to start recording');
@@ -431,8 +450,149 @@ export default function NewRecordingScreen({
     }
   };
 
+  /**
+   * Upload a completed chunk silently in the background.
+   * Does NOT change any UI state — the user stays in the 'recording' view.
+   * Each chunk becomes a separate Recording entry in the API.
+   */
+  const silentChunkUpload = async (fileUri: string, partIndex: number, sessionId: string) => {
+    try {
+      const extension = fileUri.split('.').pop()?.toLowerCase();
+      const mimeType = extension === 'caf' ? 'audio/x-caf' : 'audio/m4a';
+
+      const createResult = await createRecording(userId, {
+        title: `Recording ${sessionStartTimeRef.current} (Part ${partIndex})`,
+        mode: 'general',
+        mimeType,
+        sessionId,
+        chunkIndex: partIndex,
+      });
+
+      const headers: Record<string, string> = {};
+      if (createResult.requiredHeaders) {
+        Object.assign(headers, createResult.requiredHeaders);
+      } else {
+        headers['Content-Type'] = createResult.contentType ?? mimeType;
+      }
+
+      const uploadResp = await FileSystem.uploadAsync(createResult.uploadUrl, fileUri, {
+        httpMethod: 'PUT',
+        headers,
+        uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+        sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
+      });
+
+      if (uploadResp.status >= 200 && uploadResp.status < 300) {
+        await completeUpload(userId, createResult.recordingId, {});
+      }
+      // Clean up the chunk file from disk after successful upload
+      await FileSystem.deleteAsync(fileUri, { idempotent: true }).catch(() => {});
+    } catch (err) {
+      // Non-fatal — the file stays on disk; crash recovery will find it if needed
+      console.warn(`Chunk ${partIndex} background upload failed:`, err);
+    }
+  };
+
+  /**
+   * Rotate to a new recording chunk:
+   * 1. Stop the current chunk and get its URI
+   * 2. Start a new chunk immediately (minimal audio gap)
+   * 3. Upload the old chunk silently in the background
+   * 4. Schedule the next rotation
+   *
+   * This keeps individual chunks under CHUNK_DURATION_MS so iOS can only kill
+   * the in-progress chunk (≤60 s) — all completed chunks are safely uploaded.
+   */
+  const autoChunk = async () => {
+    if (!isRecordingRef.current || !recordingRef.current) return;
+
+    const oldRecording = recordingRef.current;
+    const partIndex = chunkIndexRef.current;
+    chunkIndexRef.current += 1;
+
+    // Stop the finished chunk
+    try {
+      await oldRecording.stopAndUnloadAsync();
+    } catch {
+      /* already stopped — continue */
+    }
+    const oldUri = oldRecording.getURI();
+
+    // If user stopped recording while we were chunking, bail out
+    if (!isRecordingRef.current) return;
+
+    try {
+      // Re-apply audio mode — iOS can reset it during the stop/start transition
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: true,
+        interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+        interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
+        shouldDuckAndroid: false,
+      });
+
+      const { recording: newRecording } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
+
+      setRecording(newRecording);
+      recordingRef.current = newRecording;
+
+      // Update stale key so crash recovery always finds the latest chunk
+      const newUri = newRecording.getURI();
+      if (newUri) {
+        AsyncStorage.setItem(
+          STALE_RECORDING_KEY,
+          JSON.stringify({ uri: newUri, startTime: recordingStartTimeRef.current })
+        ).catch(() => {});
+      }
+
+      // Schedule the next rotation
+      chunkTimeoutRef.current = setTimeout(autoChunk, CHUNK_DURATION_MS);
+    } catch (err) {
+      // Could not start new chunk — stop recording gracefully
+      console.warn('autoChunk: could not start next chunk', err);
+      isRecordingRef.current = false;
+      if (durationTimeoutRef.current) {
+        clearTimeout(durationTimeoutRef.current);
+        durationTimeoutRef.current = null;
+      }
+      deactivateKeepAwake(KEEP_AWAKE_TAG);
+      setRecording(null);
+      recordingRef.current = null;
+      setState('idle');
+    }
+
+    // Create session on the first chunk rotation (lazy — only for long recordings)
+    if (!sessionIdRef.current) {
+      try {
+        const sess = await createSession(userId, `Recording ${sessionStartTimeRef.current}`);
+        sessionIdRef.current = sess.sessionId;
+      } catch (err) {
+        console.warn(
+          'autoChunk: could not create session (uploads will proceed without grouping)',
+          err
+        );
+      }
+    }
+
+    // Fire-and-forget upload of the completed chunk
+    if (oldUri && sessionIdRef.current) {
+      silentChunkUpload(oldUri, partIndex, sessionIdRef.current).catch(() => {});
+    }
+  };
+
   const handleStop = async () => {
-    if (!recording) return;
+    // Cancel pending auto-chunk first so we always process the current chunk as the final one
+    if (chunkTimeoutRef.current) {
+      clearTimeout(chunkTimeoutRef.current);
+      chunkTimeoutRef.current = null;
+    }
+
+    // Use ref so we get the latest chunk even if React state hasn't flushed yet
+    const rec = recordingRef.current;
+    if (!rec) return;
 
     try {
       setState('stopping');
@@ -446,16 +606,16 @@ export default function NewRecordingScreen({
 
       // Try to stop and unload, but handle "already unloaded" error gracefully
       try {
-        await recording.stopAndUnloadAsync();
-        uri = recording.getURI();
+        await rec.stopAndUnloadAsync();
+        uri = rec.getURI();
       } catch (err) {
         // If error is about already unloaded, try to get URI anyway
         if (err instanceof Error && err.message.includes('already been unloaded')) {
           console.log('Recording already unloaded, getting URI directly');
-          uri = recording.getURI();
+          uri = rec.getURI();
         } else {
           // For other errors, try to get URI before throwing
-          uri = recording.getURI();
+          uri = rec.getURI();
           if (!uri) {
             throw err;
           }
@@ -492,6 +652,10 @@ export default function NewRecordingScreen({
                 clearTimeout(durationTimeoutRef.current);
                 durationTimeoutRef.current = null;
               }
+              if (chunkTimeoutRef.current) {
+                clearTimeout(chunkTimeoutRef.current);
+                chunkTimeoutRef.current = null;
+              }
               isRecordingRef.current = false;
               if (recording) {
                 await recording.stopAndUnloadAsync();
@@ -504,6 +668,7 @@ export default function NewRecordingScreen({
                 recordingRef.current = null;
               }
               await AsyncStorage.removeItem(STALE_RECORDING_KEY).catch(() => {});
+              sessionIdRef.current = null;
               onCancel();
             } catch (err) {
               console.error('Error discarding recording:', err);
@@ -535,11 +700,17 @@ export default function NewRecordingScreen({
         mimeType = 'audio/m4a';
       }
 
+      // Tag the final chunk with the session so the backend can group all chunks
+      const finalChunkIndex = chunkIndexRef.current;
       console.log('Creating recording with API URL:', process.env.EXPO_PUBLIC_API_BASE_URL);
       const createResult = await createRecording(userId, {
         title: `Recording ${new Date().toLocaleTimeString()}`,
         mode: 'general',
         mimeType,
+        ...(sessionIdRef.current != null && {
+          sessionId: sessionIdRef.current,
+          chunkIndex: finalChunkIndex,
+        }),
       });
       console.log('Recording created:', createResult.recordingId);
 
@@ -659,6 +830,16 @@ export default function NewRecordingScreen({
         if (statusResult.status === 'complete') {
           setState('complete');
           setUploadProgress('Complete!');
+
+          // If this was the final chunk of a long session, kick off the session debrief.
+          // Fire-and-forget: the backend may return 202 if earlier chunks are still processing
+          // (backend handles that gracefully). The user navigates to the recording detail
+          // immediately; the session debrief appears when they revisit the recordings list.
+          if (sessionIdRef.current) {
+            triggerSessionDebrief(userId, sessionIdRef.current).catch(() => {});
+            sessionIdRef.current = null;
+          }
+
           // Navigate to detail screen
           setTimeout(() => {
             if (!pollCancelledRef.current) onComplete(id);

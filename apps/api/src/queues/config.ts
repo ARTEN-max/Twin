@@ -8,6 +8,7 @@ import { getRedisConnection } from '../lib/redis.js';
 export const QUEUE_NAMES = {
   TRANSCRIPTION: 'transcription',
   DEBRIEF: 'debrief',
+  SESSION_DEBRIEF: 'session-debrief',
 } as const;
 
 export type QueueName = (typeof QUEUE_NAMES)[keyof typeof QUEUE_NAMES];
@@ -89,6 +90,17 @@ export interface TranscriptionResult {
 
 export interface DebriefResult {
   debriefId: string;
+  markdown: string;
+  sectionCount: number;
+}
+
+export interface SessionDebriefJobData {
+  sessionId: string;
+  userId: string;
+}
+
+export interface SessionDebriefResult {
+  sessionId: string;
   markdown: string;
   sectionCount: number;
 }
