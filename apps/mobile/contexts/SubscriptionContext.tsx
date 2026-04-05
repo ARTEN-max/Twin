@@ -52,9 +52,13 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
   const loadOfferings = useCallback(async () => {
     try {
       const o = await Purchases.getOfferings();
+      console.log('RC offerings:', JSON.stringify(o));
       setOfferings(o);
-    } catch (err) {
-      console.warn('RevenueCat offerings fetch failed:', err);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : JSON.stringify(err);
+      console.warn('RevenueCat offerings fetch failed:', msg);
+      // Silently fail — offerings unavailable means paywall shows no products,
+      // which is handled gracefully in PaywallScreen. Never show raw RC errors to users.
     }
   }, []);
 

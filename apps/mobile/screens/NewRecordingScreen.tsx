@@ -119,30 +119,35 @@ export default function NewRecordingScreen({
         isRecordingRef.current &&
         recordingRef.current
       ) {
-        recordingRef.current
-          .getStatusAsync()
-          .then((status) => {
-            if (!status.isRecording && isRecordingRef.current) {
-              // Recording was killed by the OS — clean up
-              isRecordingRef.current = false;
-              if (durationTimeoutRef.current) {
-                clearTimeout(durationTimeoutRef.current);
-                durationTimeoutRef.current = null;
+        // Delay the status check — iOS needs a moment to fully restore the audio
+        // session after unlock. Checking immediately can return isRecording=false
+        // even when the recording is still active, causing a false cleanup.
+        setTimeout(() => {
+          if (!recordingRef.current || !isRecordingRef.current) return;
+          recordingRef.current
+            .getStatusAsync()
+            .then((status) => {
+              if (!status.isRecording && isRecordingRef.current) {
+                // Recording was genuinely killed by the OS — clean up
+                isRecordingRef.current = false;
+                if (durationTimeoutRef.current) {
+                  clearTimeout(durationTimeoutRef.current);
+                  durationTimeoutRef.current = null;
+                }
+                setRecording(null);
+                recordingRef.current = null;
+                setState('idle');
+                setDuration(0);
+                durationRef.current = 0;
+              } else if (status.isRecording) {
+                // Still recording — recalibrate timer from wall clock
+                const elapsed = Math.floor((Date.now() - recordingStartTimeRef.current) / 1000);
+                durationRef.current = elapsed;
+                setDuration(elapsed);
               }
-              setRecording(null);
-              recordingRef.current = null;
-              setState('idle');
-              setDuration(0);
-              durationRef.current = 0;
-            } else if (status.isRecording) {
-              // Still recording — recalibrate timer from wall clock so it shows
-              // the correct duration after being paused in background
-              const elapsed = Math.floor((Date.now() - recordingStartTimeRef.current) / 1000);
-              durationRef.current = elapsed;
-              setDuration(elapsed);
-            }
-          })
-          .catch(() => {});
+            })
+            .catch(() => {});
+        }, 1500);
       }
     });
 
