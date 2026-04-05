@@ -22,7 +22,9 @@ import {
   Alert,
   Linking,
   AppState,
+  Animated,
 } from 'react-native';
+import { theme } from '../theme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -78,6 +80,13 @@ export default function NewRecordingScreen({
   const durationRef = useRef(0); // Track duration in ref to avoid closure issues
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const isRecordingRef = useRef(false);
+  const pollCancelledRef = useRef(false);
+  const recordingRef = useRef<Audio.Recording | null>(null); // For use in callbacks without stale closure
+
+  // Animations
+  const pulseScale = useRef(new Animated.Value(1)).current;
+  const recDotOpacity = useRef(new Animated.Value(1)).current;
+  const waveformAnims = useRef(Array.from({ length: 10 }, () => new Animated.Value(6))).current;
 
   // Fetch usage info on mount
   useEffect(() => {
@@ -91,13 +100,43 @@ export default function NewRecordingScreen({
       .catch(() => {}); // non-critical, fail silently
   }, [userId]);
 
+  // Keep recordingRef in sync so AppState handler can access it without stale closure
+  useEffect(() => {
+    recordingRef.current = recording;
+  }, [recording]);
+
   // Handle app backgrounding during recording
-  // Note: We allow recording to continue in background - user must manually stop
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextAppState) => {
+      const prev = appStateRef.current;
       appStateRef.current = nextAppState;
-      // Don't stop recording when app goes to background - allow continuous recording
-      // User must manually stop recording
+
+      // When coming back to foreground, verify recording is still running
+      if (
+        nextAppState === 'active' &&
+        prev.match(/background|inactive/) &&
+        isRecordingRef.current &&
+        recordingRef.current
+      ) {
+        recordingRef.current
+          .getStatusAsync()
+          .then((status) => {
+            if (!status.isRecording && isRecordingRef.current) {
+              // Recording was interrupted by the OS while backgrounded — clean up state
+              isRecordingRef.current = false;
+              if (durationTimeoutRef.current) {
+                clearTimeout(durationTimeoutRef.current);
+                durationTimeoutRef.current = null;
+              }
+              setRecording(null);
+              recordingRef.current = null;
+              setState('idle');
+              setDuration(0);
+              durationRef.current = 0;
+            }
+          })
+          .catch(() => {});
+      }
     });
 
     return () => {
@@ -144,15 +183,61 @@ export default function NewRecordingScreen({
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      pollCancelledRef.current = true;
+      isRecordingRef.current = false;
       if (durationTimeoutRef.current) {
         clearTimeout(durationTimeoutRef.current);
         durationTimeoutRef.current = null;
       }
-      if (recording) {
-        recording.stopAndUnloadAsync().catch(console.error);
+      if (recordingRef.current) {
+        recordingRef.current.stopAndUnloadAsync().catch(() => {});
       }
     };
-  }, [recording]);
+  }, []);
+
+  // Idle pulse ring animation
+  useEffect(() => {
+    if (state === 'idle' || state === 'requesting-permission') {
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseScale, { toValue: 1.08, duration: 1200, useNativeDriver: true }),
+          Animated.timing(pulseScale, { toValue: 1, duration: 1200, useNativeDriver: true }),
+        ])
+      );
+      loop.start();
+      return () => loop.stop();
+    }
+  }, [state]);
+
+  // Recording: REC dot blink + waveform bars
+  useEffect(() => {
+    if (state === 'recording') {
+      const dotLoop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(recDotOpacity, { toValue: 0, duration: 600, useNativeDriver: true }),
+          Animated.timing(recDotOpacity, { toValue: 1, duration: 600, useNativeDriver: true }),
+        ])
+      );
+      dotLoop.start();
+
+      const waveLoops = waveformAnims.map((anim, i) => {
+        const maxH = 8 + Math.random() * 24;
+        const dur = 300 + i * 80;
+        return Animated.loop(
+          Animated.sequence([
+            Animated.timing(anim, { toValue: maxH, duration: dur, useNativeDriver: false }),
+            Animated.timing(anim, { toValue: 4, duration: dur, useNativeDriver: false }),
+          ])
+        );
+      });
+      waveLoops.forEach((l) => l.start());
+      return () => {
+        dotLoop.stop();
+        waveLoops.forEach((l) => l.stop());
+        waveformAnims.forEach((a) => a.setValue(6));
+      };
+    }
+  }, [state]);
 
   const formatDuration = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
@@ -227,9 +312,20 @@ export default function NewRecordingScreen({
         staysActiveInBackground: true, // Allow recording when app is in background
       });
 
-      // Create and start recording
+      // Create and start recording; status callback detects unexpected stops
       const { recording: newRecording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
+        Audio.RecordingOptionsPresets.HIGH_QUALITY,
+        (status) => {
+          if (!status.isRecording && isRecordingRef.current) {
+            // OS interrupted the recording (call, Siri, etc.) — clean up
+            isRecordingRef.current = false;
+            if (durationTimeoutRef.current) {
+              clearTimeout(durationTimeoutRef.current);
+              durationTimeoutRef.current = null;
+            }
+          }
+        },
+        500
       );
 
       // Clear any existing timeout first
@@ -238,16 +334,12 @@ export default function NewRecordingScreen({
         durationTimeoutRef.current = null;
       }
 
-      // Clear any existing timeout first
-      if (durationTimeoutRef.current) {
-        clearTimeout(durationTimeoutRef.current);
-        durationTimeoutRef.current = null;
-      }
-
       setRecording(newRecording);
+      recordingRef.current = newRecording;
       durationRef.current = 0; // Reset ref
       setDuration(0); // Reset duration when starting
       isRecordingRef.current = true;
+      pollCancelledRef.current = false; // Reset for new recording session
 
       // Set state - useEffect will handle starting the timer
       setState('recording');
@@ -461,8 +553,13 @@ export default function NewRecordingScreen({
     const baseDelay = 2000; // Start with 2 seconds
 
     while (attempts < maxAttempts) {
+      // Stop polling if component was unmounted
+      if (pollCancelledRef.current) return;
+
       try {
         const statusResult = await getRecordingStatus(userId, id);
+        if (pollCancelledRef.current) return;
+
         setUploadProgress(`Processing... (${statusResult.status})`);
 
         if (statusResult.status === 'complete') {
@@ -470,7 +567,7 @@ export default function NewRecordingScreen({
           setUploadProgress('Complete!');
           // Navigate to detail screen
           setTimeout(() => {
-            onComplete(id);
+            if (!pollCancelledRef.current) onComplete(id);
           }, 500);
           return;
         }
@@ -488,6 +585,7 @@ export default function NewRecordingScreen({
         await new Promise((resolve) => setTimeout(resolve, delay));
         attempts++;
       } catch (err) {
+        if (pollCancelledRef.current) return;
         console.error('Error polling:', err);
         if (err instanceof ApiClientError && err.statusCode === 404) {
           // Recording not found yet, keep polling
@@ -500,6 +598,8 @@ export default function NewRecordingScreen({
         throw err;
       }
     }
+
+    if (pollCancelledRef.current) return;
 
     // Timeout - but don't throw error, just show a message and allow navigation
     setError(
@@ -584,12 +684,12 @@ export default function NewRecordingScreen({
             <Text style={styles.explainerCtaText}>Open Settings</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.explainerCta, { backgroundColor: '#333', marginTop: 12 }]}
+            style={[styles.explainerCta, { backgroundColor: theme.surface, marginTop: 12 }]}
             onPress={async () => {
               await proceedToRecord();
             }}
           >
-            <Text style={[styles.explainerCtaText, { color: '#fff' }]}>Try Again</Text>
+            <Text style={[styles.explainerCtaText, { color: theme.textPrimary }]}>Try Again</Text>
           </TouchableOpacity>
         </View>
       );
@@ -599,24 +699,35 @@ export default function NewRecordingScreen({
       return (
         <View style={styles.mainContent}>
           {usedRecordings !== null && recordingLimit !== null && (
-            <Text style={styles.usageBadge}>
-              {usedRecordings} of {recordingLimit} recordings used this month
-            </Text>
+            <View style={styles.usagePill}>
+              <Text style={styles.usagePillText}>
+                {usedRecordings} of {recordingLimit} recordings
+              </Text>
+            </View>
           )}
-          <TouchableOpacity
-            style={styles.recordButton}
-            onPress={startRecording}
-            disabled={state === 'requesting-permission'}
-          >
-            {state === 'requesting-permission' ? (
-              <ActivityIndicator color="#fff" size="large" />
-            ) : (
-              <Text style={styles.recordButtonIcon}>🎤</Text>
-            )}
-          </TouchableOpacity>
-          <Text style={styles.helperText}>
-            Audio is encrypted and uploaded to our servers for AI transcription after you stop.
-          </Text>
+
+          {/* Concentric pulse rings + record button */}
+          <Animated.View style={[styles.ringOuter, { transform: [{ scale: pulseScale }] }]}>
+            <View style={styles.ringMid}>
+              <TouchableOpacity
+                style={styles.recordButton}
+                onPress={startRecording}
+                disabled={state === 'requesting-permission'}
+                activeOpacity={0.85}
+              >
+                {state === 'requesting-permission' ? (
+                  <ActivityIndicator color={theme.bg} size="large" />
+                ) : (
+                  <Text style={styles.recordButtonIcon}>🎙</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </Animated.View>
+
+          <Text style={styles.tapHint}>Tap to begin recording</Text>
+
+          <View style={styles.helperDivider} />
+          <Text style={styles.helperText}>Audio is processed securely for AI transcription.</Text>
         </View>
       );
     }
@@ -624,11 +735,24 @@ export default function NewRecordingScreen({
     if (state === 'recording') {
       return (
         <View style={styles.mainContent}>
-          <TouchableOpacity style={[styles.recordButton, styles.stopButton]} onPress={handleStop}>
+          {/* REC indicator */}
+          <View style={styles.recRow}>
+            <Animated.View style={[styles.recDot, { opacity: recDotOpacity }]} />
+            <Text style={styles.recLabel}>REC</Text>
+            <Text style={styles.timerText}>{formatDuration(duration)}</Text>
+          </View>
+
+          {/* Animated waveform */}
+          <View style={styles.waveformContainer}>
+            {waveformAnims.map((anim, i) => (
+              <Animated.View key={i} style={[styles.waveBar, { height: anim }]} />
+            ))}
+          </View>
+
+          {/* Stop button */}
+          <TouchableOpacity style={styles.stopButton} onPress={handleStop} activeOpacity={0.85}>
             <View style={styles.stopButtonInner} />
           </TouchableOpacity>
-          <Text style={styles.timerText}>{formatDuration(duration)}</Text>
-          <Text style={styles.recordingText}>Recording...</Text>
         </View>
       );
     }
@@ -636,7 +760,7 @@ export default function NewRecordingScreen({
     if (state === 'stopping' || state === 'uploading' || state === 'processing') {
       return (
         <View style={styles.mainContent}>
-          <ActivityIndicator size="large" color="#0ff" />
+          <ActivityIndicator size="large" color={theme.accent} />
           <Text style={styles.statusText}>{uploadProgress || 'Processing...'}</Text>
           {state === 'uploading' && (
             <Text style={styles.helperText}>This may take a moment...</Text>
@@ -648,7 +772,9 @@ export default function NewRecordingScreen({
     if (state === 'complete') {
       return (
         <View style={styles.mainContent}>
-          <Text style={styles.successIcon}>✓</Text>
+          <View style={styles.successCircle}>
+            <Text style={styles.successIcon}>✓</Text>
+          </View>
           <Text style={styles.statusText}>Recording complete!</Text>
         </View>
       );
@@ -689,7 +815,7 @@ export default function NewRecordingScreen({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: theme.bg,
   },
   header: {
     flexDirection: 'row',
@@ -697,24 +823,25 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     padding: 20,
     paddingTop: 60,
-    backgroundColor: '#1a1a1a',
+    backgroundColor: theme.surface,
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomColor: theme.border,
   },
   cancelButton: {
     padding: 8,
   },
   cancelButtonText: {
-    color: '#0ff',
-    fontSize: 16,
+    color: theme.accent,
+    fontSize: 15,
   },
   headerTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    color: theme.textPrimary,
+    letterSpacing: 0.3,
   },
   headerSpacer: {
-    width: 60, // Balance the cancel button
+    width: 60,
   },
   mainContent: {
     flex: 1,
@@ -722,122 +849,204 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 40,
   },
+  // Usage pill
+  usagePill: {
+    borderWidth: 1,
+    borderColor: theme.border,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 5,
+    marginBottom: 48,
+  },
+  usagePillText: {
+    fontFamily: theme.fontMono,
+    fontSize: 12,
+    color: theme.textSecondary,
+  },
+  // Concentric rings
+  ringOuter: {
+    width: 176,
+    height: 176,
+    borderRadius: 88,
+    backgroundColor: 'rgba(201,168,76,0.06)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 36,
+  },
+  ringMid: {
+    width: 148,
+    height: 148,
+    borderRadius: 74,
+    backgroundColor: 'rgba(201,168,76,0.10)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   recordButton: {
     width: 120,
     height: 120,
     borderRadius: 60,
-    backgroundColor: '#0ff',
+    backgroundColor: theme.accent,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 30,
-    shadowColor: '#0ff',
+    shadowColor: theme.accent,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.5,
-    shadowRadius: 20,
+    shadowOpacity: 0.35,
+    shadowRadius: 18,
     elevation: 10,
   },
   recordButtonIcon: {
-    fontSize: 48,
+    fontSize: 44,
   },
-  stopButton: {
-    backgroundColor: '#f00',
-    shadowColor: '#f00',
+  tapHint: {
+    fontFamily: theme.fontMono,
+    fontSize: 13,
+    color: theme.textSecondary,
+    marginBottom: 32,
   },
-  stopButtonInner: {
+  helperDivider: {
     width: 40,
-    height: 40,
-    borderRadius: 4,
-    backgroundColor: '#fff',
-  },
-  timerText: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 10,
-    fontVariant: ['tabular-nums'],
-  },
-  recordingText: {
-    fontSize: 16,
-    color: '#888',
+    height: 1,
+    backgroundColor: theme.border,
+    marginBottom: 16,
   },
   helperText: {
-    fontSize: 14,
-    color: '#888',
+    fontSize: 13,
+    color: theme.textMuted,
     textAlign: 'center',
-    marginTop: 20,
+    lineHeight: 20,
+  },
+  // Recording state
+  recRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 32,
+  },
+  recDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: theme.error,
+  },
+  recLabel: {
+    fontFamily: theme.fontMono,
+    fontSize: 12,
+    color: theme.error,
+    letterSpacing: 1.5,
+    marginRight: 8,
+  },
+  timerText: {
+    fontFamily: theme.fontMono,
+    fontSize: 36,
+    color: theme.textPrimary,
+    letterSpacing: 2,
+  },
+  waveformContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    height: 40,
+    marginBottom: 44,
+  },
+  waveBar: {
+    width: 3,
+    borderRadius: 2,
+    backgroundColor: theme.accent,
+  },
+  stopButton: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: 'rgba(192,96,96,0.2)',
+    borderWidth: 1.5,
+    borderColor: theme.error,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  stopButtonInner: {
+    width: 28,
+    height: 28,
+    borderRadius: 4,
+    backgroundColor: theme.error,
   },
   statusText: {
-    fontSize: 18,
-    color: '#fff',
+    fontFamily: theme.fontMono,
+    fontSize: 15,
+    color: theme.textSecondary,
     marginTop: 20,
     textAlign: 'center',
   },
-  successIcon: {
-    fontSize: 64,
-    color: '#0f0',
+  successCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: 'rgba(109,170,122,0.15)',
+    borderWidth: 1,
+    borderColor: theme.success,
+    justifyContent: 'center',
+    alignItems: 'center',
     marginBottom: 20,
   },
+  successIcon: {
+    fontSize: 28,
+    color: theme.success,
+  },
   errorIcon: {
-    fontSize: 64,
-    color: '#f00',
+    fontSize: 52,
+    color: theme.error,
     marginBottom: 20,
   },
   errorText: {
-    fontSize: 16,
-    color: '#f88',
+    fontSize: 14,
+    color: theme.error,
     textAlign: 'center',
     marginBottom: 20,
     paddingHorizontal: 20,
+    lineHeight: 20,
   },
   retryButton: {
-    backgroundColor: '#0ff',
+    backgroundColor: theme.accent,
     paddingHorizontal: 24,
     paddingVertical: 12,
-    borderRadius: 8,
+    borderRadius: 10,
     marginTop: 10,
   },
   retryButtonText: {
-    color: '#000',
-    fontSize: 16,
+    color: theme.bg,
+    fontSize: 15,
     fontWeight: '600',
   },
-  usageBadge: {
-    fontSize: 12,
-    color: '#888',
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  // ── Mic explainer styles ──
+  // Mic explainer
   explainerIcon: {
-    fontSize: 64,
+    fontSize: 56,
     marginBottom: 16,
     textAlign: 'center',
   },
   explainerTitle: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#fff',
+    fontFamily: theme.fontDisplay,
+    fontSize: 26,
+    color: theme.textPrimary,
     textAlign: 'center',
     marginBottom: 12,
   },
   explainerBody: {
     fontSize: 15,
-    color: '#aaa',
+    color: theme.textSecondary,
     textAlign: 'center',
     lineHeight: 22,
     marginBottom: 28,
     paddingHorizontal: 20,
   },
   explainerCta: {
-    backgroundColor: '#0ff',
+    backgroundColor: theme.accent,
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: 'center',
     width: '100%',
   },
   explainerCtaText: {
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '700',
-    color: '#000',
+    color: theme.bg,
   },
 });

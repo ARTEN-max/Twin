@@ -99,9 +99,11 @@ export default function ChatScreen({ onBack: _onBack, onPaywall }: ChatScreenPro
   const [dailyContext, setDailyContext] = useState<DailyContext>({ recordings: [] });
   const [selectedDate, setSelectedDate] = useState<string>(todayString);
   const flatListRef = useRef<FlatList>(null);
-  // Ref so callbacks always see the latest date without stale closures
+  // Refs so callbacks always see latest values without stale closures
   const selectedDateRef = useRef(selectedDate);
   selectedDateRef.current = selectedDate;
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
 
   // Restore last-viewed chat date on mount, but never a future date
   useEffect(() => {
@@ -255,13 +257,14 @@ export default function ChatScreen({ onBack: _onBack, onPaywall }: ChatScreenPro
   }, [userId, selectedDate]);
 
   // Poll for proactive openers (today only)
+  // Use messagesRef so this effect doesn't recreate the interval on every message
   useEffect(() => {
     const interval = setInterval(async () => {
       const date = selectedDateRef.current;
       if (sending || date !== todayString()) return;
       try {
         const session = await getChatSession(userId, date);
-        if (session.messages && session.messages.length > messages.length) {
+        if (session.messages && session.messages.length > messagesRef.current.length) {
           const normalized = normalizeMessages(session.messages);
           setMessages(normalized);
           await saveMessagesLocally(normalized, date);
@@ -271,16 +274,17 @@ export default function ChatScreen({ onBack: _onBack, onPaywall }: ChatScreenPro
       }
     }, 15_000);
     return () => clearInterval(interval);
-  }, [userId, messages.length, sending]);
+  }, [userId, sending]);
 
   // Refresh on foreground (today only)
+  // Use messagesRef so this effect doesn't re-subscribe on every message
   useEffect(() => {
     const sub = AppState.addEventListener('change', (nextState) => {
       const date = selectedDateRef.current;
       if (nextState === 'active' && !sending && date === todayString()) {
         getChatSession(userId, date)
           .then(async (session) => {
-            if (session.messages && session.messages.length > messages.length) {
+            if (session.messages && session.messages.length > messagesRef.current.length) {
               const normalized = normalizeMessages(session.messages);
               setMessages(normalized);
               await saveMessagesLocally(normalized, date);
@@ -292,7 +296,7 @@ export default function ChatScreen({ onBack: _onBack, onPaywall }: ChatScreenPro
       }
     });
     return () => sub.remove();
-  }, [userId, messages.length, sending]);
+  }, [userId, sending]);
 
   const handleSend = async (retryCount = 0) => {
     const text = inputText.trim();
@@ -490,7 +494,7 @@ export default function ChatScreen({ onBack: _onBack, onPaywall }: ChatScreenPro
       <View style={styles.container}>
         {renderHeader()}
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#0ff" />
+          <ActivityIndicator size="large" color={theme.accent} />
         </View>
       </View>
     );

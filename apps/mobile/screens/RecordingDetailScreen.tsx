@@ -1,4 +1,4 @@
-/* global setTimeout */
+/* global setTimeout, clearTimeout */
 /**
  * RecordingDetailScreen
  *
@@ -10,7 +10,7 @@
  * - Auto-polling if still processing
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -119,6 +119,20 @@ export default function RecordingDetailScreen({
   const [activeTab, setActiveTab] = useState<'debrief' | 'transcript'>('debrief');
   const [isPolling, setIsPolling] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const isMountedRef = useRef(true);
+  const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cancel any pending poll and mark unmounted on cleanup
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      if (pollTimeoutRef.current) {
+        clearTimeout(pollTimeoutRef.current);
+        pollTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   const loadRecording = useCallback(
     async (showPolling = false) => {
@@ -129,6 +143,8 @@ export default function RecordingDetailScreen({
 
         const response = await getRecording(userId, recordingId, true);
         const detail = toRecordingDetail(response);
+
+        if (!isMountedRef.current) return; // Component unmounted, don't update state
         setRecording(detail);
 
         if (
@@ -136,11 +152,14 @@ export default function RecordingDetailScreen({
           detail.status === 'pending' ||
           detail.status === 'uploaded'
         ) {
-          setTimeout(() => loadRecording(true), 3000);
+          pollTimeoutRef.current = setTimeout(() => {
+            if (isMountedRef.current) loadRecording(true);
+          }, 3000);
         } else {
           setIsPolling(false);
         }
       } catch (err) {
+        if (!isMountedRef.current) return;
         const msg =
           err instanceof ApiClientError
             ? `${err.message} (${err.statusCode})`
@@ -150,7 +169,7 @@ export default function RecordingDetailScreen({
         setError(msg);
         setIsPolling(false);
       } finally {
-        setLoading(false);
+        if (isMountedRef.current) setLoading(false);
       }
     },
     [recordingId]

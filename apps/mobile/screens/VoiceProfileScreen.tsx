@@ -28,6 +28,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import Constants from 'expo-constants';
 import { useAuth } from '../contexts/AuthContext';
 import { getVoiceProfileStatus, deleteVoiceProfile, ApiClientError } from '@komuchi/shared';
+import { theme } from '../theme';
 
 // User ID is now provided by Firebase Auth via useAuth()
 
@@ -120,17 +121,19 @@ export default function VoiceProfileScreen({ onBack, onPaywall }: VoiceProfileSc
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      isRecordingRef.current = false;
       if (durationTimeoutRef.current) {
         clearTimeout(durationTimeoutRef.current);
         durationTimeoutRef.current = null;
       }
+      // Abort any in-flight upload
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
       if (recording) {
-        // Safely unload recording on unmount
-        // Use a simpler approach to avoid async issues in cleanup
         try {
-          recording.stopAndUnloadAsync().catch(() => {
-            // Ignore errors - recording may already be unloaded
-          });
+          recording.stopAndUnloadAsync().catch(() => {});
         } catch {
           // Ignore errors in cleanup
         }
@@ -591,7 +594,7 @@ export default function VoiceProfileScreen({ onBack, onPaywall }: VoiceProfileSc
     if (state === 'checking') {
       return (
         <View style={styles.mainContent}>
-          <ActivityIndicator size="large" color="#0ff" />
+          <ActivityIndicator size="large" color={theme.accent} />
           <Text style={styles.statusText}>Checking voice profile status...</Text>
         </View>
       );
@@ -764,17 +767,17 @@ export default function VoiceProfileScreen({ onBack, onPaywall }: VoiceProfileSc
               </Text>
             )}
             {(durationRef.current || duration) >= 5 && (durationRef.current || duration) <= 60 && (
-              <Text style={[styles.helperText, { color: '#0ff' }]}>
+              <Text style={[styles.helperText, { color: theme.success }]}>
                 ✓ Duration: {durationRef.current || duration}s - Ready to enroll!
               </Text>
             )}
             {state === 'uploading' && (
               <View style={{ marginTop: 10, alignItems: 'center' }}>
-                <ActivityIndicator size="large" color="#0ff" />
+                <ActivityIndicator size="large" color={theme.accent} />
                 <Text
                   style={[
                     styles.helperText,
-                    { color: '#0ff', marginTop: 10, fontSize: 16, fontWeight: '600' },
+                    { color: theme.accent, marginTop: 10, fontSize: 16, fontWeight: '600' },
                   ]}
                 >
                   Uploading and processing voice sample...
@@ -838,7 +841,7 @@ export default function VoiceProfileScreen({ onBack, onPaywall }: VoiceProfileSc
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: theme.bg,
   },
   header: {
     flexDirection: 'row',
@@ -846,21 +849,22 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     padding: 20,
     paddingTop: 60,
-    backgroundColor: '#1a1a1a',
+    backgroundColor: theme.surface,
     borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    borderBottomColor: theme.border,
   },
   backButton: {
     padding: 8,
   },
   backButtonText: {
-    color: '#0ff',
-    fontSize: 16,
+    color: theme.accent,
+    fontFamily: theme.fontMono,
+    fontSize: 14,
   },
   headerTitle: {
+    fontFamily: theme.fontDisplay,
     fontSize: 20,
-    fontWeight: 'bold',
-    color: '#fff',
+    color: theme.textPrimary,
   },
   headerSpacer: {
     width: 60,
@@ -878,41 +882,47 @@ const styles = StyleSheet.create({
     padding: 40,
   },
   statusText: {
-    fontSize: 18,
-    color: '#fff',
+    fontFamily: theme.fontMono,
+    fontSize: 15,
+    color: theme.textSecondary,
     marginTop: 20,
     textAlign: 'center',
   },
   helperText: {
-    fontSize: 14,
-    color: '#888',
+    fontFamily: theme.fontMono,
+    fontSize: 12,
+    color: theme.textSecondary,
     textAlign: 'center',
     marginTop: 10,
     paddingHorizontal: 20,
+    lineHeight: 18,
   },
   recordingHelperText: {
-    fontSize: 14,
-    color: '#0ff',
+    fontFamily: theme.fontMono,
+    fontSize: 12,
+    color: theme.accent,
     textAlign: 'center',
     marginTop: 10,
-    fontWeight: '600',
+    letterSpacing: 0.5,
   },
   successIcon: {
     fontSize: 64,
-    color: '#0f0',
+    color: theme.success,
     marginBottom: 20,
   },
   section: {
-    backgroundColor: '#1a1a1a',
+    backgroundColor: theme.surface,
     borderRadius: 12,
+    borderWidth: 1,
+    borderColor: theme.border,
     padding: 20,
-    marginBottom: 20,
+    marginBottom: 16,
   },
   sectionTitle: {
+    fontFamily: theme.fontDisplay,
     fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-    marginBottom: 12,
+    color: theme.textPrimary,
+    marginBottom: 14,
   },
   instructionItem: {
     flexDirection: 'row',
@@ -920,32 +930,40 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   instructionNumber: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#0ff',
-    color: '#000',
-    fontSize: 12,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: theme.accentDim,
+    borderWidth: 1,
+    borderColor: theme.borderStrong,
+    color: theme.accent,
+    fontSize: 11,
+    fontFamily: theme.fontMono,
     fontWeight: '600',
     textAlign: 'center',
-    lineHeight: 24,
+    lineHeight: 22,
     marginRight: 12,
   },
   instructionText: {
     flex: 1,
-    fontSize: 14,
-    color: '#888',
+    fontFamily: theme.fontMono,
+    fontSize: 13,
+    color: theme.textSecondary,
     lineHeight: 20,
   },
   errorContainer: {
-    backgroundColor: '#2a1a1a',
+    backgroundColor: theme.errorDim,
     borderRadius: 8,
-    padding: 16,
-    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(184,92,92,0.25)',
+    padding: 14,
+    marginBottom: 16,
   },
   errorText: {
-    color: '#f88',
-    fontSize: 14,
+    fontFamily: theme.fontMono,
+    color: theme.error,
+    fontSize: 13,
+    lineHeight: 19,
   },
   recordingHeader: {
     flexDirection: 'row',
@@ -954,10 +972,10 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   timerText: {
+    fontFamily: theme.fontMono,
     fontSize: 18,
-    fontWeight: '600',
-    color: '#0ff',
-    fontVariant: ['tabular-nums'],
+    color: theme.accent,
+    letterSpacing: 1,
   },
   buttonRow: {
     flexDirection: 'row',
@@ -965,91 +983,105 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   recordButton: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#0ff',
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    backgroundColor: theme.accent,
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: theme.accent,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.35,
+    shadowRadius: 14,
+    elevation: 8,
   },
   recordButtonActive: {
-    backgroundColor: '#f00',
+    backgroundColor: theme.error,
+    shadowColor: theme.error,
   },
   recordButtonIcon: {
-    fontSize: 32,
+    fontSize: 30,
   },
   stopButtonInner: {
-    width: 30,
-    height: 30,
+    width: 26,
+    height: 26,
     borderRadius: 4,
-    backgroundColor: '#fff',
+    backgroundColor: theme.textPrimary,
   },
   resetButton: {
-    paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
     borderRadius: 8,
-    backgroundColor: '#2a2a2a',
+    backgroundColor: theme.surfaceHigh,
     borderWidth: 1,
-    borderColor: '#444',
+    borderColor: theme.border,
   },
   resetButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
+    fontFamily: theme.fontMono,
+    color: theme.textPrimary,
+    fontSize: 13,
   },
   previewContainer: {
-    marginTop: 16,
+    marginTop: 14,
     padding: 12,
-    backgroundColor: '#2a2a2a',
+    backgroundColor: theme.surfaceHigh,
     borderRadius: 8,
+    borderWidth: 1,
+    borderColor: theme.border,
   },
   previewLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#fff',
-    marginBottom: 4,
+    fontFamily: theme.fontMono,
+    fontSize: 10,
+    color: theme.textMuted,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+    marginBottom: 6,
   },
   previewDuration: {
+    fontFamily: theme.fontMono,
     fontSize: 12,
-    color: '#888',
+    color: theme.textSecondary,
   },
   enrollButton: {
-    backgroundColor: '#0ff',
+    backgroundColor: theme.accent,
     paddingHorizontal: 24,
     paddingVertical: 14,
-    borderRadius: 8,
+    borderRadius: 10,
     alignItems: 'center',
     minHeight: 48,
     justifyContent: 'center',
   },
   enrollButtonDisabled: {
-    backgroundColor: '#444',
+    backgroundColor: theme.surfaceHigh,
     opacity: 0.5,
   },
   enrollButtonText: {
-    color: '#000',
-    fontSize: 16,
+    fontFamily: theme.fontMono,
+    color: theme.bg,
+    fontSize: 14,
     fontWeight: '600',
+    letterSpacing: 0.5,
   },
   uploadText: {
-    fontSize: 14,
-    color: '#888',
+    fontFamily: theme.fontMono,
+    fontSize: 12,
+    color: theme.textSecondary,
     textAlign: 'center',
-    marginTop: 12,
+    marginTop: 10,
   },
   deleteButton: {
     marginTop: 20,
     paddingHorizontal: 20,
     paddingVertical: 12,
     borderRadius: 8,
-    backgroundColor: '#2a1a1a',
+    backgroundColor: theme.errorDim,
     borderWidth: 1,
-    borderColor: '#f44',
+    borderColor: 'rgba(184,92,92,0.3)',
   },
   deleteButtonText: {
-    color: '#f88',
-    fontSize: 14,
-    fontWeight: '600',
+    fontFamily: theme.fontMono,
+    color: theme.error,
+    fontSize: 13,
     textAlign: 'center',
   },
 });
