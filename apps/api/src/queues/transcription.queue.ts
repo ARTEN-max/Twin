@@ -7,12 +7,15 @@ import {
   type DebriefJobData,
 } from './config.js';
 import { getPresignedDownloadUrl } from '../lib/storage.js';
-import { transcribe } from '../lib/ai/index.js';
+import { transcribe, getTranscriptionProvider } from '../lib/ai/index.js';
 import { diarizeAudio } from '../lib/ai/diarization.js';
 import { db } from '../lib/db.js';
 import { transcriptionQueue, debriefQueue } from './queues.js';
 import { getEnv } from '../lib/env.js';
-import { withTempTranscodeToWav16kMono } from '../lib/audio/ffmpeg.js';
+import {
+  withTempSplitUrlToWav16kMonoChunks,
+  withTempTranscodeToWav16kMono,
+} from '../lib/audio/ffmpeg.js';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -31,6 +34,10 @@ interface WhisperSegment {
   text: string;
   speaker?: string;
 }
+
+const LONG_RECORDING_FILE_SIZE_BYTES = 75 * 1024 * 1024;
+const TRANSCRIPTION_CHUNK_SECONDS = 15 * 60;
+const MAX_DIARIZATION_DURATION_SEC = 90 * 60;
 
 // ============================================
 // Worker
@@ -70,12 +77,25 @@ export function startTranscriptionWorker(): Worker<
         // Optional: if ENABLE_FFMPEG_TRANSCODE=true and the input is webm/ogg (common MediaRecorder formats),
         // download + transcode to WAV 16k mono server-side to avoid provider format issues.
         const env = getEnv();
+        const providerName = getTranscriptionProvider().name;
         const normalizedMime = mimeType.split(';')[0]?.trim().toLowerCase();
+        const recordingMeta = await db.recording.findUnique({
+          where: { id: recordingId },
+          select: {
+            fileSize: true,
+          },
+        });
+        const shouldChunkTranscription =
+          providerName === 'openai' ||
+          normalizedMime === 'audio/webm' ||
+          normalizedMime === 'audio/ogg' ||
+          (recordingMeta?.fileSize ?? 0) >= LONG_RECORDING_FILE_SIZE_BYTES;
 
         log('Transcribing audio');
-        const transcriptionResult =
-          env.ENABLE_FFMPEG_TRANSCODE &&
-          (normalizedMime === 'audio/webm' || normalizedMime === 'audio/ogg')
+        const transcriptionResult = shouldChunkTranscription
+          ? await transcribeInChunks(downloadUrl, normalizedMime, log)
+          : env.ENABLE_FFMPEG_TRANSCODE &&
+              (normalizedMime === 'audio/webm' || normalizedMime === 'audio/ogg')
             ? await withTempTranscodeToWav16kMono(
                 { url: downloadUrl, inputMimeType: normalizedMime },
                 async ({ buffer, mimeType: outMime }) =>
@@ -103,6 +123,12 @@ export function startTranscriptionWorker(): Worker<
         let tmpAudioPath: string | null = null;
 
         try {
+          const transcriptionDuration = transcriptionResult.duration ?? 0;
+          if (transcriptionDuration > MAX_DIARIZATION_DURATION_SEC) {
+            log(`Skipping diarization for long recording (${Math.round(transcriptionDuration)}s)`);
+            throw new Error('skip_diarization_for_long_recording');
+          }
+
           log('Starting speaker diarization');
 
           // Download audio file to temp location for diarization
@@ -152,7 +178,10 @@ export function startTranscriptionWorker(): Worker<
             log(`Merged ${transcriptionResult.segments.length} segments with speaker labels`);
           }
         } catch (error) {
-          log(`Diarization warning: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          const message = error instanceof Error ? error.message : 'Unknown error';
+          if (message !== 'skip_diarization_for_long_recording') {
+            log(`Diarization warning: ${message}`);
+          }
           // Continue without diarization if it fails
         } finally {
           // Clean up temp file
@@ -229,9 +258,9 @@ export function startTranscriptionWorker(): Worker<
             recordingMode: recording.mode,
             recordingTitle: recording.title,
             userId,
-            recordingDuration: recording.duration ?? (transcriptionResult.duration
-              ? Math.round(transcriptionResult.duration)
-              : undefined),
+            recordingDuration:
+              recording.duration ??
+              (transcriptionResult.duration ? Math.round(transcriptionResult.duration) : undefined),
           };
 
           await debriefQueue.add(`debrief-${recordingId}`, debriefJobData, {
@@ -284,6 +313,84 @@ export function startTranscriptionWorker(): Worker<
   });
 
   return transcriptionWorker;
+}
+
+async function transcribeInChunks(
+  downloadUrl: string,
+  inputMimeType: string,
+  log: (msg: string) => void
+): Promise<{
+  text: string;
+  segments: Array<{
+    start: number;
+    end: number;
+    text: string;
+    speaker?: string;
+    confidence?: number;
+  }>;
+  language: string;
+  duration: number;
+  metadata: { model?: string; chunkCount: number };
+}> {
+  return withTempSplitUrlToWav16kMonoChunks(
+    {
+      url: downloadUrl,
+      inputMimeType,
+      segmentSeconds: TRANSCRIPTION_CHUNK_SECONDS,
+    },
+    async (chunks) => {
+      const mergedText: string[] = [];
+      const mergedSegments: Array<{
+        start: number;
+        end: number;
+        text: string;
+        speaker?: string;
+        confidence?: number;
+      }> = [];
+      let totalDuration = 0;
+      let language = 'en';
+      let modelName: string | undefined;
+
+      for (const chunk of chunks) {
+        log(`Transcribing chunk ${chunk.index + 1}/${chunks.length}`);
+        const result = await transcribe(
+          { type: 'buffer', data: chunk.buffer, mimeType: chunk.mimeType },
+          { punctuate: true, diarize: false }
+        );
+
+        if (result.text.trim()) {
+          mergedText.push(result.text.trim());
+        }
+
+        const offset = totalDuration || chunk.estimatedOffsetSec;
+        const adjustedSegments = (result.segments ?? []).map((segment) => ({
+          ...segment,
+          start: segment.start + offset,
+          end: segment.end + offset,
+        }));
+        mergedSegments.push(...adjustedSegments);
+
+        totalDuration +=
+          result.duration ??
+          (adjustedSegments.length > 0
+            ? adjustedSegments[adjustedSegments.length - 1]!.end - offset
+            : TRANSCRIPTION_CHUNK_SECONDS);
+        language = result.language || language;
+        modelName = typeof result.metadata?.model === 'string' ? result.metadata.model : modelName;
+      }
+
+      return {
+        text: mergedText.join('\n\n'),
+        segments: mergedSegments,
+        language,
+        duration: totalDuration,
+        metadata: {
+          model: modelName,
+          chunkCount: chunks.length,
+        },
+      };
+    }
+  );
 }
 
 export async function stopTranscriptionWorker(): Promise<void> {

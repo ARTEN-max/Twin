@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { createWriteStream } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
@@ -10,6 +11,13 @@ export interface TranscodeResult {
   buffer: Buffer;
   mimeType: 'audio/wav';
   tempDir: string;
+}
+
+export interface AudioChunk {
+  index: number;
+  buffer: Buffer;
+  mimeType: 'audio/wav';
+  estimatedOffsetSec: number;
 }
 
 function normalizeMimeType(mimeType: string): string {
@@ -64,10 +72,13 @@ async function runFfmpeg(args: string[]): Promise<void> {
     });
 
     child.on('error', (err) => {
+      const errorCode =
+        err && typeof err === 'object' && 'code' in err ? String(err.code) : undefined;
+
       // ENOENT: ffmpeg not installed
       reject(
         new Error(
-          err instanceof Error && (err as NodeJS.ErrnoException).code === 'ENOENT'
+          err instanceof Error && errorCode === 'ENOENT'
             ? 'ffmpeg is not installed or not on PATH. Install ffmpeg or set ENABLE_FFMPEG_TRANSCODE=false.'
             : `Failed to run ffmpeg: ${err instanceof Error ? err.message : String(err)}`
         )
@@ -98,7 +109,18 @@ export async function transcodeUrlToWav16kMono(params: {
   await downloadUrlToFile(params.url, inputPath);
 
   // -ac 1: mono, -ar 16000: 16kHz, -loglevel error: reduce noise
-  await runFfmpeg(['-y', '-loglevel', 'error', '-i', inputPath, '-ac', '1', '-ar', '16000', outputPath]);
+  await runFfmpeg([
+    '-y',
+    '-loglevel',
+    'error',
+    '-i',
+    inputPath,
+    '-ac',
+    '1',
+    '-ar',
+    '16000',
+    outputPath,
+  ]);
 
   const buffer = await readFile(outputPath);
   return { buffer, mimeType: 'audio/wav', tempDir };
@@ -119,3 +141,61 @@ export async function withTempTranscodeToWav16kMono<T>(
   }
 }
 
+export async function withTempSplitUrlToWav16kMonoChunks<T>(
+  params: {
+    url: string;
+    inputMimeType: string;
+    segmentSeconds: number;
+  },
+  fn: (chunks: AudioChunk[]) => Promise<T>
+): Promise<T> {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'komuchi-audio-chunks-'));
+  try {
+    const inputPath = path.join(tempDir, `input.${extForMime(params.inputMimeType)}`);
+    const chunksDir = path.join(tempDir, 'chunks');
+    await mkdir(chunksDir, { recursive: true });
+
+    await downloadUrlToFile(params.url, inputPath);
+
+    const outputPattern = path.join(chunksDir, 'chunk-%03d.wav');
+    await runFfmpeg([
+      '-y',
+      '-loglevel',
+      'error',
+      '-i',
+      inputPath,
+      '-ac',
+      '1',
+      '-ar',
+      '16000',
+      '-c:a',
+      'pcm_s16le',
+      '-f',
+      'segment',
+      '-segment_time',
+      String(params.segmentSeconds),
+      outputPattern,
+    ]);
+
+    const chunkFiles = (await readdir(chunksDir))
+      .filter((name) => name.endsWith('.wav'))
+      .sort((a, b) => a.localeCompare(b));
+
+    if (chunkFiles.length === 0) {
+      throw new Error('ffmpeg did not produce any audio chunks');
+    }
+
+    const chunks = await Promise.all(
+      chunkFiles.map(async (fileName, index) => ({
+        index,
+        buffer: await readFile(path.join(chunksDir, fileName)),
+        mimeType: 'audio/wav' as const,
+        estimatedOffsetSec: index * params.segmentSeconds,
+      }))
+    );
+
+    return await fn(chunks);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}

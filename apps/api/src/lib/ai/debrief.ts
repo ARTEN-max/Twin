@@ -13,6 +13,9 @@ export interface DebriefResult {
   sections: DebriefSection[];
 }
 
+const TRANSCRIPT_CHARS_PER_SUMMARY_CHUNK = 16000;
+const DIRECT_DEBRIEF_CHAR_LIMIT = 24000;
+
 // Get the debrief provider from env
 function getDebriefProvider(): DebriefProvider {
   const provider = process.env.DEBRIEF_PROVIDER || 'openai';
@@ -305,6 +308,10 @@ export async function generateDebrief(
 
   const client = getOpenAIClient();
   const systemPrompt = SYSTEM_PROMPTS[mode] || SYSTEM_PROMPTS.general;
+  const transcriptForPrompt =
+    transcriptText.length > DIRECT_DEBRIEF_CHAR_LIMIT
+      ? await buildLongTranscriptDigest(client, transcriptText, mode, title)
+      : transcriptText;
 
   const response = await client.chat.completions.create({
     model: 'gpt-4o',
@@ -315,7 +322,7 @@ export async function generateDebrief(
       },
       {
         role: 'user',
-        content: `Transcript title: "${title}"\nMode: "${mode}"\n\nTranscript:\n${transcriptText}`,
+        content: `Transcript title: "${title}"\nMode: "${mode}"\n\nTranscript:\n${transcriptForPrompt}`,
       },
     ],
     temperature: 0.3, // Lower temperature for more consistent output
@@ -334,6 +341,93 @@ export async function generateDebrief(
     markdown,
     sections,
   };
+}
+
+async function buildLongTranscriptDigest(
+  client: OpenAI,
+  transcriptText: string,
+  mode: string,
+  title: string
+): Promise<string> {
+  const chunks = splitTranscriptForSummaries(transcriptText, TRANSCRIPT_CHARS_PER_SUMMARY_CHUNK);
+  const summaries: string[] = [];
+
+  for (let index = 0; index < chunks.length; index++) {
+    const chunk = chunks[index];
+    const response = await client.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content:
+            'Summarize this transcript chunk for a later final debrief. Capture only concrete moments, recurring patterns, emotional shifts, decisions, standout quotes, and unresolved threads. Keep it compact but information-dense.',
+        },
+        {
+          role: 'user',
+          content:
+            `Recording title: "${title}"\nMode: "${mode}"\nChunk ${index + 1} of ${chunks.length}\n\n` +
+            `Transcript chunk:\n${chunk}`,
+        },
+      ],
+      temperature: 0.2,
+      max_tokens: 600,
+    });
+
+    const content = response.choices[0]?.message?.content?.trim();
+    if (!content) {
+      throw new Error(`Failed to summarize transcript chunk ${index + 1}`);
+    }
+
+    summaries.push(`Chunk ${index + 1} summary:\n${content}`);
+  }
+
+  return (
+    'This recording was too long to pass as one raw transcript. Below are ordered chunk summaries extracted from the full session. ' +
+    'Base the final debrief on the full arc of these summaries, not just one moment.\n\n' +
+    summaries.join('\n\n')
+  );
+}
+
+function splitTranscriptForSummaries(transcriptText: string, maxChars: number): string[] {
+  const paragraphs = transcriptText
+    .split(/\n\s*\n/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (paragraphs.length === 0) {
+    return [transcriptText.slice(0, maxChars)];
+  }
+
+  const chunks: string[] = [];
+  let current = '';
+
+  for (const paragraph of paragraphs) {
+    const candidate = current ? `${current}\n\n${paragraph}` : paragraph;
+    if (candidate.length <= maxChars) {
+      current = candidate;
+      continue;
+    }
+
+    if (current) {
+      chunks.push(current);
+    }
+
+    if (paragraph.length <= maxChars) {
+      current = paragraph;
+      continue;
+    }
+
+    for (let start = 0; start < paragraph.length; start += maxChars) {
+      chunks.push(paragraph.slice(start, start + maxChars));
+    }
+    current = '';
+  }
+
+  if (current) {
+    chunks.push(current);
+  }
+
+  return chunks;
 }
 
 // ============================================

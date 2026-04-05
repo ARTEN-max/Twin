@@ -1,4 +1,4 @@
-/* global setTimeout, clearTimeout, console, process, fetch, atob */
+/* global setTimeout, clearTimeout, console, process */
 /**
  * NewRecordingScreen
  *
@@ -27,10 +27,10 @@ import {
 import { theme } from '../theme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Audio, InterruptionModeIOS, InterruptionModeAndroid } from 'expo-av';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as FileSystem from 'expo-file-system/legacy';
 import {
   createRecording,
-  uploadRecordingFile,
   completeUpload,
   getRecordingStatus,
   retryTranscription,
@@ -42,6 +42,7 @@ import { useConsent } from '../contexts/ConsentContext';
 
 const MIC_EXPLAINED_KEY = 'twin_mic_permission_explained';
 const STALE_RECORDING_KEY = 'twin:stale_recording';
+const KEEP_AWAKE_TAG = 'twin-recording';
 
 type RecordingState =
   | 'idle'
@@ -163,35 +164,50 @@ export default function NewRecordingScreen({
         isRecordingRef.current &&
         recordingRef.current
       ) {
-        // Delay the status check — iOS needs a moment to fully restore the audio
-        // session after unlock. Checking immediately can return isRecording=false
-        // even when the recording is still active, causing a false cleanup.
-        setTimeout(() => {
-          if (!recordingRef.current || !isRecordingRef.current) return;
-          recordingRef.current
-            .getStatusAsync()
-            .then((status) => {
-              if (!status.isRecording && isRecordingRef.current) {
-                // Recording was genuinely killed by the OS — clean up
-                isRecordingRef.current = false;
-                if (durationTimeoutRef.current) {
-                  clearTimeout(durationTimeoutRef.current);
-                  durationTimeoutRef.current = null;
-                }
-                setRecording(null);
-                recordingRef.current = null;
-                setState('idle');
-                setDuration(0);
-                durationRef.current = 0;
-              } else if (status.isRecording) {
-                // Still recording — recalibrate timer from wall clock
-                const elapsed = Math.floor((Date.now() - recordingStartTimeRef.current) / 1000);
-                durationRef.current = elapsed;
-                setDuration(elapsed);
-              }
-            })
-            .catch(() => {});
-        }, 1500);
+        const verifyRecordingStillRunning = (attempt: number) => {
+          setTimeout(
+            () => {
+              if (!recordingRef.current || !isRecordingRef.current) return;
+
+              recordingRef.current
+                .getStatusAsync()
+                .then((status) => {
+                  if (status.isRecording) {
+                    const elapsed = Math.floor((Date.now() - recordingStartTimeRef.current) / 1000);
+                    durationRef.current = elapsed;
+                    setDuration(elapsed);
+                    return;
+                  }
+
+                  if (attempt < 4) {
+                    verifyRecordingStillRunning(attempt + 1);
+                    return;
+                  }
+
+                  // After several checks, treat it as a genuine OS stop.
+                  isRecordingRef.current = false;
+                  if (durationTimeoutRef.current) {
+                    clearTimeout(durationTimeoutRef.current);
+                    durationTimeoutRef.current = null;
+                  }
+                  deactivateKeepAwake(KEEP_AWAKE_TAG);
+                  setRecording(null);
+                  recordingRef.current = null;
+                  setState('idle');
+                  setDuration(0);
+                  durationRef.current = 0;
+                })
+                .catch(() => {
+                  if (attempt < 4) {
+                    verifyRecordingStillRunning(attempt + 1);
+                  }
+                });
+            },
+            attempt === 0 ? 1500 : 1000
+          );
+        };
+
+        verifyRecordingStillRunning(0);
       }
     });
 
@@ -237,6 +253,7 @@ export default function NewRecordingScreen({
         clearTimeout(durationTimeoutRef.current);
         durationTimeoutRef.current = null;
       }
+      deactivateKeepAwake(KEEP_AWAKE_TAG);
       if (recordingRef.current) {
         recordingRef.current.stopAndUnloadAsync().catch(() => {});
       }
@@ -255,6 +272,8 @@ export default function NewRecordingScreen({
       loop.start();
       return () => loop.stop();
     }
+
+    return undefined;
   }, [state]);
 
   // Recording: REC dot blink + waveform bars
@@ -285,6 +304,8 @@ export default function NewRecordingScreen({
         waveformAnims.forEach((a) => a.setValue(6));
       };
     }
+
+    return undefined;
   }, [state]);
 
   const formatDuration = (seconds: number): string => {
@@ -383,16 +404,18 @@ export default function NewRecordingScreen({
       recordingRef.current = newRecording;
       durationRef.current = 0;
       recordingStartTimeRef.current = Date.now();
-      setDuration(0);
       isRecordingRef.current = true;
       pollCancelledRef.current = false;
 
-      // Persist URI immediately so we can recover if iOS kills the app mid-recording
+      // Keep screen alive so iOS never suspends the JS thread mid-recording
+      activateKeepAwakeAsync(KEEP_AWAKE_TAG);
+
+      // Persist URI so we can recover if iOS kills the app mid-recording
       const uri = newRecording.getURI();
       if (uri) {
         AsyncStorage.setItem(
           STALE_RECORDING_KEY,
-          JSON.stringify({ uri, startTime: recordingStartTimeRef.current })
+          JSON.stringify({ uri, startTime: Date.now() })
         ).catch(() => {});
       }
 
@@ -443,7 +466,9 @@ export default function NewRecordingScreen({
         throw new Error('No recording URI returned');
       }
 
+      deactivateKeepAwake(KEEP_AWAKE_TAG);
       setRecording(null);
+      recordingRef.current = null;
 
       // Start upload flow
       await uploadFlow(uri);
@@ -467,13 +492,16 @@ export default function NewRecordingScreen({
                 clearTimeout(durationTimeoutRef.current);
                 durationTimeoutRef.current = null;
               }
+              isRecordingRef.current = false;
               if (recording) {
                 await recording.stopAndUnloadAsync();
                 const uri = recording.getURI();
                 if (uri) {
                   await FileSystem.deleteAsync(uri, { idempotent: true });
                 }
+                deactivateKeepAwake(KEEP_AWAKE_TAG);
                 setRecording(null);
+                recordingRef.current = null;
               }
               await AsyncStorage.removeItem(STALE_RECORDING_KEY).catch(() => {});
               onCancel();
@@ -518,25 +546,14 @@ export default function NewRecordingScreen({
       setRecordingId(createResult.recordingId);
       setUploadProgress('Uploading audio...');
 
-      // Step 2: Read file and convert to bytes
-      const base64 = await FileSystem.readAsStringAsync(fileUri, {
-        encoding: 'base64',
-      });
+      // Step 2: Read file metadata once and upload the file natively from disk.
+      const fileInfo = await FileSystem.getInfoAsync(fileUri);
+      const fileSize = fileInfo.exists
+        ? ((fileInfo as { size?: number }).size ?? undefined)
+        : undefined;
 
-      const binaryString = atob(base64);
-      const bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-
-      // Step 3: Upload file (try direct API upload first, fallback to presigned)
+      // Step 3: Upload file from disk (presigned first, direct API fallback).
       try {
-        await uploadRecordingFile(userId, createResult.recordingId, bytes.buffer, mimeType);
-        setUploadProgress('Upload complete, processing...');
-      } catch (directUploadError) {
-        console.error('Direct upload failed, trying presigned URL:', directUploadError);
-
-        // Fallback to presigned URL
         const headers: Record<string, string> = {};
         if (createResult.requiredHeaders) {
           Object.assign(headers, createResult.requiredHeaders);
@@ -546,25 +563,45 @@ export default function NewRecordingScreen({
           headers['Content-Type'] = mimeType;
         }
 
-        const uploadResponse = await fetch(createResult.uploadUrl, {
-          method: 'PUT',
-          body: bytes.buffer,
+        const uploadResponse = await FileSystem.uploadAsync(createResult.uploadUrl, fileUri, {
+          httpMethod: 'PUT',
           headers,
+          uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+          sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
         });
 
-        if (!uploadResponse.ok) {
-          const errorText = await uploadResponse.text();
-          throw new Error(
-            `Upload failed: ${uploadResponse.status} ${uploadResponse.statusText}\n${errorText}`
-          );
+        if (uploadResponse.status < 200 || uploadResponse.status >= 300) {
+          const errorText = uploadResponse.body || '';
+          throw new Error(`Upload failed: ${uploadResponse.status}\n${errorText}`);
         }
+        setUploadProgress('Upload complete, processing...');
+      } catch (presignedUploadError) {
+        console.error('Presigned upload failed, trying direct API upload:', presignedUploadError);
 
-        // Complete upload for presigned flow
-        await completeUpload(userId, createResult.recordingId, {
-          fileSize: bytes.length,
-        });
+        const directUploadResponse = await FileSystem.uploadAsync(
+          `${process.env.EXPO_PUBLIC_API_BASE_URL}/api/recordings/${createResult.recordingId}/upload`,
+          fileUri,
+          {
+            httpMethod: 'POST',
+            headers: {
+              'x-user-id': userId,
+              'Content-Type': mimeType,
+            },
+            uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+            sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
+          }
+        );
+
+        if (directUploadResponse.status < 200 || directUploadResponse.status >= 300) {
+          const errorText = directUploadResponse.body || '';
+          throw new Error(`Direct upload failed: ${directUploadResponse.status}\n${errorText}`);
+        }
         setUploadProgress('Upload complete, processing...');
       }
+
+      await completeUpload(userId, createResult.recordingId, {
+        fileSize,
+      });
 
       // Step 4: Poll for completion
       setState('processing');
