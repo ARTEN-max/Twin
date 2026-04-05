@@ -94,6 +94,11 @@ export default function NewRecordingScreen({
   const chunkIndexRef = useRef(0); // Which chunk we're about to start (increments per rotation)
   const sessionStartTimeRef = useRef(''); // Time label for chunk upload titles
   const sessionIdRef = useRef<string | null>(null); // Created on first chunk rotation; null for short recordings
+  // Interruption recovery — forward ref so createRecordingWithMonitor can call the
+  // restart function before it is defined (breaks the circular dependency).
+  const restartAfterInterruptionRef = useRef<() => Promise<void>>(async () => {});
+  const unexpectedStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isRestartingRef = useRef(false); // Guard against concurrent restarts
 
   // Animations
   const pulseScale = useRef(new Animated.Value(1)).current;
@@ -273,6 +278,11 @@ export default function NewRecordingScreen({
         clearTimeout(chunkTimeoutRef.current);
         chunkTimeoutRef.current = null;
       }
+      if (unexpectedStopTimerRef.current) {
+        clearTimeout(unexpectedStopTimerRef.current);
+        unexpectedStopTimerRef.current = null;
+      }
+      isRestartingRef.current = false;
       deactivateKeepAwake(KEEP_AWAKE_TAG);
       if (recordingRef.current) {
         recordingRef.current.stopAndUnloadAsync().catch(() => {});
@@ -382,6 +392,131 @@ export default function NewRecordingScreen({
     }
   };
 
+  /**
+   * Create a recording instance with a status-monitoring callback attached.
+   * The callback detects when recording unexpectedly stops (e.g. iOS suspends the
+   * audio session after locking the screen) and automatically restarts it after a
+   * 3-second debounce — long enough to avoid false positives from the brief
+   * isRecording=false blip iOS emits during the lock-screen animation.
+   */
+  const createRecordingWithMonitor = async (): Promise<Audio.Recording> => {
+    const { recording } = await Audio.Recording.createAsync(
+      Audio.RecordingOptionsPresets.HIGH_QUALITY,
+      (status) => {
+        if (!isRecordingRef.current) return;
+
+        if (status.isRecording) {
+          // Still alive — cancel any pending restart
+          if (unexpectedStopTimerRef.current) {
+            clearTimeout(unexpectedStopTimerRef.current);
+            unexpectedStopTimerRef.current = null;
+          }
+          return;
+        }
+
+        // Not recording. Debounce before treating as a genuine OS-level stop.
+        if (unexpectedStopTimerRef.current || isRestartingRef.current) return;
+        unexpectedStopTimerRef.current = setTimeout(() => {
+          unexpectedStopTimerRef.current = null;
+          if (!isRecordingRef.current || isRestartingRef.current) return;
+          // Genuine stop — restart via the forward ref so we always call the
+          // current version of the function, not a stale closure copy.
+          restartAfterInterruptionRef.current();
+        }, 3000);
+      }
+    );
+    return recording;
+  };
+
+  /**
+   * Called when the status monitor detects the recording has genuinely stopped
+   * while the user hasn't pressed Stop (e.g. iOS suspended the audio session).
+   * Saves the interrupted chunk and immediately starts a new recording.
+   */
+  const restartRecordingAfterInterruption = async () => {
+    if (!isRecordingRef.current || isRestartingRef.current) return;
+    isRestartingRef.current = true;
+
+    const oldRecording = recordingRef.current;
+    const partIndex = chunkIndexRef.current;
+    chunkIndexRef.current += 1;
+
+    try {
+      await oldRecording?.stopAndUnloadAsync();
+    } catch {
+      /* already unloaded */
+    }
+    const oldUri = oldRecording?.getURI() ?? null;
+
+    try {
+      // Re-apply audio mode — iOS may have reset the session category on interruption
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: true,
+        interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+        interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
+        shouldDuckAndroid: false,
+      });
+
+      const newRecording = await createRecordingWithMonitor();
+      setRecording(newRecording);
+      recordingRef.current = newRecording;
+
+      // Update crash-recovery key with the new chunk's URI
+      const newUri = newRecording.getURI();
+      if (newUri) {
+        AsyncStorage.setItem(
+          STALE_RECORDING_KEY,
+          JSON.stringify({ uri: newUri, startTime: recordingStartTimeRef.current })
+        ).catch(() => {});
+      }
+
+      // Reschedule the foreground chunk rotation timer
+      if (chunkTimeoutRef.current) clearTimeout(chunkTimeoutRef.current);
+      chunkTimeoutRef.current = setTimeout(autoChunk, CHUNK_DURATION_MS);
+    } catch (restartErr) {
+      // Could not restart — let the recording be "over" and surface via crash recovery
+      console.warn('restartRecordingAfterInterruption: failed to restart', restartErr);
+      isRecordingRef.current = false;
+      if (durationTimeoutRef.current) {
+        clearTimeout(durationTimeoutRef.current);
+        durationTimeoutRef.current = null;
+      }
+      if (chunkTimeoutRef.current) {
+        clearTimeout(chunkTimeoutRef.current);
+        chunkTimeoutRef.current = null;
+      }
+      deactivateKeepAwake(KEEP_AWAKE_TAG);
+      setRecording(null);
+      recordingRef.current = null;
+      setState('idle');
+      isRestartingRef.current = false;
+      return;
+    }
+
+    isRestartingRef.current = false;
+
+    // Upload the interrupted chunk silently so context isn't lost
+    if (oldUri) {
+      if (!sessionIdRef.current) {
+        // Create a session now if we haven't yet (first interruption before first rotation)
+        createSession(userId, `Recording ${sessionStartTimeRef.current}`)
+          .then((sess) => {
+            sessionIdRef.current = sess.sessionId;
+            silentChunkUpload(oldUri, partIndex, sess.sessionId).catch(() => {});
+          })
+          .catch(() => {});
+      } else {
+        silentChunkUpload(oldUri, partIndex, sessionIdRef.current).catch(() => {});
+      }
+    }
+  };
+
+  // Keep the forward ref current on every render so the status callback always
+  // invokes the latest version (avoids stale-closure bugs).
+  restartAfterInterruptionRef.current = restartRecordingAfterInterruption;
+
   /** Called after mic explainer or directly if already explained */
   const proceedToRecord = async () => {
     try {
@@ -406,13 +541,10 @@ export default function NewRecordingScreen({
         shouldDuckAndroid: false,
       });
 
-      // Create and start recording.
-      // No status callback — iOS briefly fires isRecording=false during screen lock
-      // even when background audio is active, causing false positives. The AppState
-      // foreground handler is the correct place to detect genuine stops.
-      const { recording: newRecording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
+      // Create recording with the interruption-monitoring callback attached.
+      // A 3-second debounce inside the callback filters out the brief isRecording=false
+      // blip iOS emits during the lock-screen animation while distinguishing genuine stops.
+      const newRecording = await createRecordingWithMonitor();
 
       // Clear any existing timeout first
       if (durationTimeoutRef.current) {
@@ -513,11 +645,11 @@ export default function NewRecordingScreen({
   const autoChunk = async () => {
     if (!isRecordingRef.current || !recordingRef.current) return;
 
-    // Don't rotate while backgrounded. Stopping + restarting the recording creates
-    // a gap with no active audio session, which causes iOS to immediately suspend
-    // the app and end background audio. Defer until the app is foregrounded.
+    // Don't rotate while backgrounded — stopping + restarting creates a gap that
+    // breaks background audio continuity. The foreground-return handler triggers
+    // autoChunk directly when the app becomes active again.
     if (appStateRef.current !== 'active') {
-      chunkTimeoutRef.current = setTimeout(autoChunk, 3000);
+      chunkTimeoutRef.current = null; // foreground handler will call autoChunk()
       return;
     }
 
@@ -547,9 +679,7 @@ export default function NewRecordingScreen({
         shouldDuckAndroid: false,
       });
 
-      const { recording: newRecording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
+      const newRecording = await createRecordingWithMonitor();
 
       setRecording(newRecording);
       recordingRef.current = newRecording;
@@ -599,11 +729,16 @@ export default function NewRecordingScreen({
   };
 
   const handleStop = async () => {
-    // Cancel pending auto-chunk first so we always process the current chunk as the final one
+    // Cancel pending auto-chunk and interruption-recovery timers
     if (chunkTimeoutRef.current) {
       clearTimeout(chunkTimeoutRef.current);
       chunkTimeoutRef.current = null;
     }
+    if (unexpectedStopTimerRef.current) {
+      clearTimeout(unexpectedStopTimerRef.current);
+      unexpectedStopTimerRef.current = null;
+    }
+    isRestartingRef.current = false;
 
     // Use ref so we get the latest chunk even if React state hasn't flushed yet
     const rec = recordingRef.current;
@@ -671,6 +806,11 @@ export default function NewRecordingScreen({
                 clearTimeout(chunkTimeoutRef.current);
                 chunkTimeoutRef.current = null;
               }
+              if (unexpectedStopTimerRef.current) {
+                clearTimeout(unexpectedStopTimerRef.current);
+                unexpectedStopTimerRef.current = null;
+              }
+              isRestartingRef.current = false;
               isRecordingRef.current = false;
               if (recording) {
                 await recording.stopAndUnloadAsync();
