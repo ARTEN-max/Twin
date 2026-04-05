@@ -312,20 +312,12 @@ export default function NewRecordingScreen({
         staysActiveInBackground: true, // Allow recording when app is in background
       });
 
-      // Create and start recording; status callback detects unexpected stops
+      // Create and start recording.
+      // No status callback — iOS briefly fires isRecording=false during screen lock
+      // even when background audio is active, causing false positives. The AppState
+      // foreground handler is the correct place to detect genuine stops.
       const { recording: newRecording } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY,
-        (status) => {
-          if (!status.isRecording && isRecordingRef.current) {
-            // OS interrupted the recording (call, Siri, etc.) — clean up
-            isRecordingRef.current = false;
-            if (durationTimeoutRef.current) {
-              clearTimeout(durationTimeoutRef.current);
-              durationTimeoutRef.current = null;
-            }
-          }
-        },
-        500
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
       );
 
       // Clear any existing timeout first

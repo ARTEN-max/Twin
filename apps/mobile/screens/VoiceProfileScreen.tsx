@@ -67,21 +67,43 @@ export default function VoiceProfileScreen({ onBack, onPaywall }: VoiceProfileSc
     checkVoiceProfile();
   }, []);
 
-  // Handle app backgrounding during recording
+  // Handle app state changes during recording
+  // Do NOT stop recording when screen locks or app backgrounds — background audio is enabled.
+  // Only check on foreground restore to detect if iOS killed the session unexpectedly.
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextAppState) => {
-      if (appStateRef.current.match(/active/) && nextAppState.match(/inactive|background/)) {
-        if (state === 'recording' && recording) {
-          handleStop();
-        }
-      }
+      const prev = appStateRef.current;
       appStateRef.current = nextAppState;
+
+      if (
+        nextAppState === 'active' &&
+        prev.match(/background|inactive/) &&
+        isRecordingRef.current &&
+        recording
+      ) {
+        recording
+          .getStatusAsync()
+          .then((status) => {
+            if (!status.isRecording && isRecordingRef.current) {
+              // Recording was genuinely killed by the OS — clean up
+              isRecordingRef.current = false;
+              if (durationTimeoutRef.current) {
+                clearTimeout(durationTimeoutRef.current);
+                durationTimeoutRef.current = null;
+              }
+              setRecording(null);
+              setState('idle');
+              setDuration(durationRef.current); // Keep final duration for enroll
+            }
+          })
+          .catch(() => {});
+      }
     });
 
     return () => {
       subscription.remove();
     };
-  }, [state, recording]);
+  }, [recording]);
 
   // Cleanup timeout when state changes away from recording
   useEffect(() => {
