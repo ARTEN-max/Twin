@@ -185,6 +185,13 @@ export default function NewRecordingScreen({
                     const elapsed = Math.floor((Date.now() - recordingStartTimeRef.current) / 1000);
                     durationRef.current = elapsed;
                     setDuration(elapsed);
+                    // Trigger an immediate chunk rotation to upload whatever was
+                    // recorded while the app was in the background
+                    if (chunkTimeoutRef.current) {
+                      clearTimeout(chunkTimeoutRef.current);
+                      chunkTimeoutRef.current = null;
+                    }
+                    autoChunk();
                     return;
                   }
 
@@ -505,6 +512,14 @@ export default function NewRecordingScreen({
    */
   const autoChunk = async () => {
     if (!isRecordingRef.current || !recordingRef.current) return;
+
+    // Don't rotate while backgrounded. Stopping + restarting the recording creates
+    // a gap with no active audio session, which causes iOS to immediately suspend
+    // the app and end background audio. Defer until the app is foregrounded.
+    if (appStateRef.current !== 'active') {
+      chunkTimeoutRef.current = setTimeout(autoChunk, 3000);
+      return;
+    }
 
     const oldRecording = recordingRef.current;
     const partIndex = chunkIndexRef.current;
