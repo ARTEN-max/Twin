@@ -41,6 +41,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useConsent } from '../contexts/ConsentContext';
 
 const MIC_EXPLAINED_KEY = 'twin_mic_permission_explained';
+const STALE_RECORDING_KEY = 'twin:stale_recording';
 
 type RecordingState =
   | 'idle'
@@ -99,6 +100,49 @@ export default function NewRecordingScreen({
         }
       })
       .catch(() => {}); // non-critical, fail silently
+  }, [userId]);
+
+  // Crash recovery: if iOS killed the app mid-recording, the audio file still
+  // exists on disk. On next mount we detect it and offer to upload it.
+  useEffect(() => {
+    AsyncStorage.getItem(STALE_RECORDING_KEY)
+      .then(async (saved) => {
+        if (!saved) return;
+        try {
+          const { uri, startTime } = JSON.parse(saved) as { uri: string; startTime: number };
+          const info = await FileSystem.getInfoAsync(uri);
+          const fileSize = (info as { size?: number }).size ?? 0;
+          if (info.exists && fileSize > 1000) {
+            const durationSec = Math.floor((Date.now() - startTime) / 1000);
+            Alert.alert(
+              'Interrupted Recording Found',
+              `A ${formatDuration(durationSec)} recording was cut short when the app was closed. Upload it now?`,
+              [
+                {
+                  text: 'Discard',
+                  style: 'destructive',
+                  onPress: async () => {
+                    await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
+                    await AsyncStorage.removeItem(STALE_RECORDING_KEY).catch(() => {});
+                  },
+                },
+                {
+                  text: 'Upload',
+                  onPress: async () => {
+                    await AsyncStorage.removeItem(STALE_RECORDING_KEY).catch(() => {});
+                    uploadFlow(uri);
+                  },
+                },
+              ]
+            );
+          } else {
+            await AsyncStorage.removeItem(STALE_RECORDING_KEY).catch(() => {});
+          }
+        } catch {
+          await AsyncStorage.removeItem(STALE_RECORDING_KEY).catch(() => {});
+        }
+      })
+      .catch(() => {});
   }, [userId]);
 
   // Keep recordingRef in sync so AppState handler can access it without stale closure
@@ -338,10 +382,19 @@ export default function NewRecordingScreen({
       setRecording(newRecording);
       recordingRef.current = newRecording;
       durationRef.current = 0;
-      recordingStartTimeRef.current = Date.now(); // Capture wall-clock start time
+      recordingStartTimeRef.current = Date.now();
       setDuration(0);
       isRecordingRef.current = true;
       pollCancelledRef.current = false;
+
+      // Persist URI immediately so we can recover if iOS kills the app mid-recording
+      const uri = newRecording.getURI();
+      if (uri) {
+        AsyncStorage.setItem(
+          STALE_RECORDING_KEY,
+          JSON.stringify({ uri, startTime: recordingStartTimeRef.current })
+        ).catch(() => {});
+      }
 
       setState('recording');
     } catch (err) {
@@ -416,13 +469,13 @@ export default function NewRecordingScreen({
               }
               if (recording) {
                 await recording.stopAndUnloadAsync();
-                // Delete the file
                 const uri = recording.getURI();
                 if (uri) {
                   await FileSystem.deleteAsync(uri, { idempotent: true });
                 }
                 setRecording(null);
               }
+              await AsyncStorage.removeItem(STALE_RECORDING_KEY).catch(() => {});
               onCancel();
             } catch (err) {
               console.error('Error discarding recording:', err);
@@ -438,6 +491,9 @@ export default function NewRecordingScreen({
 
   const uploadFlow = async (fileUri: string) => {
     try {
+      // Clear stale recording key — we are now actively processing this file
+      AsyncStorage.removeItem(STALE_RECORDING_KEY).catch(() => {});
+
       // Step 1: Create recording
       setState('uploading');
       setUploadProgress('Creating recording...');
