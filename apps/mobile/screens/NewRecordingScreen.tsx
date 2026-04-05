@@ -9,6 +9,9 @@
  * - Stop/Cancel controls
  * - Upload progress and processing states
  * - Auto-navigation to detail screen when complete
+ *
+ * Recording is handled by the native BackgroundRecorder module (AVAudioRecorder),
+ * which survives JS thread suspension and phone screen lock indefinitely.
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -26,9 +29,15 @@ import {
 } from 'react-native';
 import { theme } from '../theme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Audio, InterruptionModeIOS, InterruptionModeAndroid } from 'expo-av';
+import { Audio } from 'expo-av'; // kept only for permission check
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as FileSystem from 'expo-file-system/legacy';
+import {
+  startRecording as nativeStart,
+  stopChunk as nativeStopChunk,
+  stopRecording as nativeStop,
+  getRecordingStatus as getNativeStatus,
+} from 'background-recorder';
 import {
   createRecording,
   completeUpload,
@@ -45,8 +54,8 @@ import { useConsent } from '../contexts/ConsentContext';
 const MIC_EXPLAINED_KEY = 'twin_mic_permission_explained';
 const STALE_RECORDING_KEY = 'twin:stale_recording';
 const KEEP_AWAKE_TAG = 'twin-recording';
-// Chunk duration: rotate every 60 s so iOS can only kill the last chunk (max 60 s loss)
-// The JS thread is killed ~2.5 min after manual phone lock even with background audio mode.
+// Chunk duration for foreground rotation — the native module keeps recording
+// during background/lock, so chunks may be longer when returning from background.
 const CHUNK_DURATION_MS = 60 * 1000;
 
 type RecordingState =
@@ -76,7 +85,8 @@ export default function NewRecordingScreen({
   const consent = useConsent();
   const userId = user!.uid;
   const [state, setState] = useState<RecordingState>('idle');
-  const [recording, setRecording] = useState<Audio.Recording | null>(null);
+  // recording is now a boolean — the native module owns the AVAudioRecorder instance
+  const [recording, setRecording] = useState(false);
   const [recordingId, setRecordingId] = useState<string | null>(null);
   const [duration, setDuration] = useState(0); // in seconds
   const [error, setError] = useState<string | null>(null);
@@ -88,17 +98,13 @@ export default function NewRecordingScreen({
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const isRecordingRef = useRef(false);
   const pollCancelledRef = useRef(false);
-  const recordingRef = useRef<Audio.Recording | null>(null); // For use in callbacks without stale closure
+  // URI of the currently-recording chunk (for crash recovery)
+  const recordingUriRef = useRef<string | null>(null);
   const recordingStartTimeRef = useRef<number>(0); // Wall-clock start time for accurate timer
   const chunkTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null); // Auto-chunk timer
   const chunkIndexRef = useRef(0); // Which chunk we're about to start (increments per rotation)
   const sessionStartTimeRef = useRef(''); // Time label for chunk upload titles
   const sessionIdRef = useRef<string | null>(null); // Created on first chunk rotation; null for short recordings
-  // Interruption recovery — forward ref so createRecordingWithMonitor can call the
-  // restart function before it is defined (breaks the circular dependency).
-  const restartAfterInterruptionRef = useRef<() => Promise<void>>(async () => {});
-  const unexpectedStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isRestartingRef = useRef(false); // Guard against concurrent restarts
 
   // Animations
   const pulseScale = useRef(new Animated.Value(1)).current;
@@ -160,75 +166,30 @@ export default function NewRecordingScreen({
       .catch(() => {});
   }, [userId]);
 
-  // Keep recordingRef in sync so AppState handler can access it without stale closure
-  useEffect(() => {
-    recordingRef.current = recording;
-  }, [recording]);
-
-  // Handle app backgrounding during recording
+  // Handle app backgrounding during recording.
+  // When returning to foreground: trigger immediate chunk rotation to upload whatever
+  // the native module recorded while JS was suspended / phone was locked.
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextAppState) => {
       const prev = appStateRef.current;
       appStateRef.current = nextAppState;
 
-      // When coming back to foreground, verify recording is still running
       if (
         nextAppState === 'active' &&
         prev.match(/background|inactive/) &&
-        isRecordingRef.current &&
-        recordingRef.current
+        isRecordingRef.current
       ) {
-        const verifyRecordingStillRunning = (attempt: number) => {
-          setTimeout(
-            () => {
-              if (!recordingRef.current || !isRecordingRef.current) return;
+        // Sync elapsed time from wall clock
+        const elapsed = Math.floor((Date.now() - recordingStartTimeRef.current) / 1000);
+        durationRef.current = elapsed;
+        setDuration(elapsed);
 
-              recordingRef.current
-                .getStatusAsync()
-                .then((status) => {
-                  if (status.isRecording) {
-                    const elapsed = Math.floor((Date.now() - recordingStartTimeRef.current) / 1000);
-                    durationRef.current = elapsed;
-                    setDuration(elapsed);
-                    // Trigger an immediate chunk rotation to upload whatever was
-                    // recorded while the app was in the background
-                    if (chunkTimeoutRef.current) {
-                      clearTimeout(chunkTimeoutRef.current);
-                      chunkTimeoutRef.current = null;
-                    }
-                    autoChunk();
-                    return;
-                  }
-
-                  if (attempt < 4) {
-                    verifyRecordingStillRunning(attempt + 1);
-                    return;
-                  }
-
-                  // After several checks, treat it as a genuine OS stop.
-                  isRecordingRef.current = false;
-                  if (durationTimeoutRef.current) {
-                    clearTimeout(durationTimeoutRef.current);
-                    durationTimeoutRef.current = null;
-                  }
-                  deactivateKeepAwake(KEEP_AWAKE_TAG);
-                  setRecording(null);
-                  recordingRef.current = null;
-                  setState('idle');
-                  setDuration(0);
-                  durationRef.current = 0;
-                })
-                .catch(() => {
-                  if (attempt < 4) {
-                    verifyRecordingStillRunning(attempt + 1);
-                  }
-                });
-            },
-            attempt === 0 ? 1500 : 1000
-          );
-        };
-
-        verifyRecordingStillRunning(0);
+        // Rotate the chunk so background audio is uploaded now
+        if (chunkTimeoutRef.current) {
+          clearTimeout(chunkTimeoutRef.current);
+          chunkTimeoutRef.current = null;
+        }
+        autoChunk();
       }
     });
 
@@ -241,7 +202,7 @@ export default function NewRecordingScreen({
   // Uses wall-clock time (Date.now) so the counter stays accurate after the app
   // is backgrounded — JS setTimeout is paused in background, but Date.now is not.
   useEffect(() => {
-    if (state === 'recording' && recording) {
+    if (state === 'recording') {
       if (!durationTimeoutRef.current && isRecordingRef.current) {
         const scheduleNextTick = () => {
           if (isRecordingRef.current) {
@@ -278,15 +239,9 @@ export default function NewRecordingScreen({
         clearTimeout(chunkTimeoutRef.current);
         chunkTimeoutRef.current = null;
       }
-      if (unexpectedStopTimerRef.current) {
-        clearTimeout(unexpectedStopTimerRef.current);
-        unexpectedStopTimerRef.current = null;
-      }
-      isRestartingRef.current = false;
       deactivateKeepAwake(KEEP_AWAKE_TAG);
-      if (recordingRef.current) {
-        recordingRef.current.stopAndUnloadAsync().catch(() => {});
-      }
+      // Stop the native recorder so it doesn't keep running after screen unmount
+      nativeStop().catch(() => {});
     };
   }, []);
 
@@ -361,7 +316,7 @@ export default function NewRecordingScreen({
     }
   };
 
-  const startRecording = async () => {
+  const startRecordingHandler = async () => {
     try {
       // Check consent before starting
       if (!consent.hasConsent) {
@@ -392,131 +347,6 @@ export default function NewRecordingScreen({
     }
   };
 
-  /**
-   * Create a recording instance with a status-monitoring callback attached.
-   * The callback detects when recording unexpectedly stops (e.g. iOS suspends the
-   * audio session after locking the screen) and automatically restarts it after a
-   * 3-second debounce — long enough to avoid false positives from the brief
-   * isRecording=false blip iOS emits during the lock-screen animation.
-   */
-  const createRecordingWithMonitor = async (): Promise<Audio.Recording> => {
-    const { recording } = await Audio.Recording.createAsync(
-      Audio.RecordingOptionsPresets.HIGH_QUALITY,
-      (status) => {
-        if (!isRecordingRef.current) return;
-
-        if (status.isRecording) {
-          // Still alive — cancel any pending restart
-          if (unexpectedStopTimerRef.current) {
-            clearTimeout(unexpectedStopTimerRef.current);
-            unexpectedStopTimerRef.current = null;
-          }
-          return;
-        }
-
-        // Not recording. Debounce before treating as a genuine OS-level stop.
-        if (unexpectedStopTimerRef.current || isRestartingRef.current) return;
-        unexpectedStopTimerRef.current = setTimeout(() => {
-          unexpectedStopTimerRef.current = null;
-          if (!isRecordingRef.current || isRestartingRef.current) return;
-          // Genuine stop — restart via the forward ref so we always call the
-          // current version of the function, not a stale closure copy.
-          restartAfterInterruptionRef.current();
-        }, 3000);
-      }
-    );
-    return recording;
-  };
-
-  /**
-   * Called when the status monitor detects the recording has genuinely stopped
-   * while the user hasn't pressed Stop (e.g. iOS suspended the audio session).
-   * Saves the interrupted chunk and immediately starts a new recording.
-   */
-  const restartRecordingAfterInterruption = async () => {
-    if (!isRecordingRef.current || isRestartingRef.current) return;
-    isRestartingRef.current = true;
-
-    const oldRecording = recordingRef.current;
-    const partIndex = chunkIndexRef.current;
-    chunkIndexRef.current += 1;
-
-    try {
-      await oldRecording?.stopAndUnloadAsync();
-    } catch {
-      /* already unloaded */
-    }
-    const oldUri = oldRecording?.getURI() ?? null;
-
-    try {
-      // Re-apply audio mode — iOS may have reset the session category on interruption
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: true,
-        interruptionModeIOS: InterruptionModeIOS.DoNotMix,
-        interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
-        shouldDuckAndroid: false,
-      });
-
-      const newRecording = await createRecordingWithMonitor();
-      setRecording(newRecording);
-      recordingRef.current = newRecording;
-
-      // Update crash-recovery key with the new chunk's URI
-      const newUri = newRecording.getURI();
-      if (newUri) {
-        AsyncStorage.setItem(
-          STALE_RECORDING_KEY,
-          JSON.stringify({ uri: newUri, startTime: recordingStartTimeRef.current })
-        ).catch(() => {});
-      }
-
-      // Reschedule the foreground chunk rotation timer
-      if (chunkTimeoutRef.current) clearTimeout(chunkTimeoutRef.current);
-      chunkTimeoutRef.current = setTimeout(autoChunk, CHUNK_DURATION_MS);
-    } catch (restartErr) {
-      // Could not restart — let the recording be "over" and surface via crash recovery
-      console.warn('restartRecordingAfterInterruption: failed to restart', restartErr);
-      isRecordingRef.current = false;
-      if (durationTimeoutRef.current) {
-        clearTimeout(durationTimeoutRef.current);
-        durationTimeoutRef.current = null;
-      }
-      if (chunkTimeoutRef.current) {
-        clearTimeout(chunkTimeoutRef.current);
-        chunkTimeoutRef.current = null;
-      }
-      deactivateKeepAwake(KEEP_AWAKE_TAG);
-      setRecording(null);
-      recordingRef.current = null;
-      setState('idle');
-      isRestartingRef.current = false;
-      return;
-    }
-
-    isRestartingRef.current = false;
-
-    // Upload the interrupted chunk silently so context isn't lost
-    if (oldUri) {
-      if (!sessionIdRef.current) {
-        // Create a session now if we haven't yet (first interruption before first rotation)
-        createSession(userId, `Recording ${sessionStartTimeRef.current}`)
-          .then((sess) => {
-            sessionIdRef.current = sess.sessionId;
-            silentChunkUpload(oldUri, partIndex, sess.sessionId).catch(() => {});
-          })
-          .catch(() => {});
-      } else {
-        silentChunkUpload(oldUri, partIndex, sessionIdRef.current).catch(() => {});
-      }
-    }
-  };
-
-  // Keep the forward ref current on every render so the status callback always
-  // invokes the latest version (avoids stale-closure bugs).
-  restartAfterInterruptionRef.current = restartRecordingAfterInterruption;
-
   /** Called after mic explainer or directly if already explained */
   const proceedToRecord = async () => {
     try {
@@ -529,22 +359,9 @@ export default function NewRecordingScreen({
         return; // state is already set to 'mic-denied'
       }
 
-      // Configure audio mode for background recording.
-      // DoNotMix tells iOS this is a high-priority audio session that should not be
-      // interrupted by notifications, music, or other apps playing audio.
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: true,
-        interruptionModeIOS: InterruptionModeIOS.DoNotMix,
-        interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
-        shouldDuckAndroid: false,
-      });
-
-      // Create recording with the interruption-monitoring callback attached.
-      // A 3-second debounce inside the callback filters out the brief isRecording=false
-      // blip iOS emits during the lock-screen animation while distinguishing genuine stops.
-      const newRecording = await createRecordingWithMonitor();
+      // Start native recording — AVAudioRecorder configures its own audio session
+      // with .playAndRecord + staysActiveInBackground. The session survives JS suspension.
+      const uri = await nativeStart();
 
       // Clear any existing timeout first
       if (durationTimeoutRef.current) {
@@ -552,28 +369,25 @@ export default function NewRecordingScreen({
         durationTimeoutRef.current = null;
       }
 
-      setRecording(newRecording);
-      recordingRef.current = newRecording;
+      recordingUriRef.current = uri;
       durationRef.current = 0;
       recordingStartTimeRef.current = Date.now();
       isRecordingRef.current = true;
       pollCancelledRef.current = false;
 
-      // Keep screen alive so iOS never suspends the JS thread mid-recording
+      // Keep screen alive so iOS doesn't auto-lock mid-session while app is foregrounded
       activateKeepAwakeAsync(KEEP_AWAKE_TAG);
 
       // Persist URI so we can recover if iOS kills the app mid-recording
-      const uri = newRecording.getURI();
-      if (uri) {
-        AsyncStorage.setItem(
-          STALE_RECORDING_KEY,
-          JSON.stringify({ uri, startTime: Date.now() })
-        ).catch(() => {});
-      }
+      AsyncStorage.setItem(
+        STALE_RECORDING_KEY,
+        JSON.stringify({ uri, startTime: Date.now() })
+      ).catch(() => {});
 
+      setRecording(true);
       setState('recording');
 
-      // Start auto-chunking so each segment is uploaded before iOS can kill the JS thread
+      // Start auto-chunking so each segment is uploaded while app is active
       sessionStartTimeRef.current = new Date().toLocaleTimeString();
       sessionIdRef.current = null; // session is created lazily on first chunk rotation
       chunkIndexRef.current = 1; // chunk 1 will be uploaded after the first rotation
@@ -633,81 +447,44 @@ export default function NewRecordingScreen({
   };
 
   /**
-   * Rotate to a new recording chunk:
-   * 1. Stop the current chunk and get its URI
-   * 2. Start a new chunk immediately (minimal audio gap)
-   * 3. Upload the old chunk silently in the background
-   * 4. Schedule the next rotation
-   *
-   * This keeps individual chunks under CHUNK_DURATION_MS so iOS can only kill
-   * the in-progress chunk (≤60 s) — all completed chunks are safely uploaded.
+   * Rotate to a new recording chunk.
+   * nativeStopChunk() atomically stops the current chunk and starts the next one
+   * inside the native layer — zero gap in audio capture, no audio session restart.
    */
   const autoChunk = async () => {
-    if (!isRecordingRef.current || !recordingRef.current) return;
+    if (!isRecordingRef.current) return;
 
-    // Don't rotate while backgrounded — stopping + restarting creates a gap that
-    // breaks background audio continuity. The foreground-return handler triggers
-    // autoChunk directly when the app becomes active again.
-    if (appStateRef.current !== 'active') {
-      chunkTimeoutRef.current = null; // foreground handler will call autoChunk()
-      return;
-    }
-
-    const oldRecording = recordingRef.current;
     const partIndex = chunkIndexRef.current;
     chunkIndexRef.current += 1;
 
-    // Stop the finished chunk
+    let oldUri: string;
     try {
-      await oldRecording.stopAndUnloadAsync();
-    } catch {
-      /* already stopped — continue */
+      // Atomic: finish current chunk, immediately start next chunk, return finished URI
+      oldUri = await nativeStopChunk();
+    } catch (err) {
+      // Could not rotate — log but keep recording; try again next interval
+      console.warn('autoChunk: nativeStopChunk failed', err);
+      if (isRecordingRef.current) {
+        chunkTimeoutRef.current = setTimeout(autoChunk, CHUNK_DURATION_MS);
+      }
+      return;
     }
-    const oldUri = oldRecording.getURI();
 
-    // If user stopped recording while we were chunking, bail out
+    // If user stopped recording during the async stop, bail out
     if (!isRecordingRef.current) return;
 
-    try {
-      // Re-apply audio mode — iOS can reset it during the stop/start transition
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: true,
-        interruptionModeIOS: InterruptionModeIOS.DoNotMix,
-        interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
-        shouldDuckAndroid: false,
-      });
-
-      const newRecording = await createRecordingWithMonitor();
-
-      setRecording(newRecording);
-      recordingRef.current = newRecording;
-
-      // Update stale key so crash recovery always finds the latest chunk
-      const newUri = newRecording.getURI();
-      if (newUri) {
-        AsyncStorage.setItem(
-          STALE_RECORDING_KEY,
-          JSON.stringify({ uri: newUri, startTime: recordingStartTimeRef.current })
-        ).catch(() => {});
-      }
-
-      // Schedule the next rotation
-      chunkTimeoutRef.current = setTimeout(autoChunk, CHUNK_DURATION_MS);
-    } catch (err) {
-      // Could not start new chunk — stop recording gracefully
-      console.warn('autoChunk: could not start next chunk', err);
-      isRecordingRef.current = false;
-      if (durationTimeoutRef.current) {
-        clearTimeout(durationTimeoutRef.current);
-        durationTimeoutRef.current = null;
-      }
-      deactivateKeepAwake(KEEP_AWAKE_TAG);
-      setRecording(null);
-      recordingRef.current = null;
-      setState('idle');
+    // Get the new chunk URI for crash recovery
+    const newStatus = getNativeStatus();
+    if (newStatus.uri) {
+      recordingUriRef.current = newStatus.uri;
+      AsyncStorage.setItem(
+        STALE_RECORDING_KEY,
+        JSON.stringify({ uri: newStatus.uri, startTime: recordingStartTimeRef.current })
+      ).catch(() => {});
     }
+
+    // Schedule the next rotation
+    chunkTimeoutRef.current = setTimeout(autoChunk, CHUNK_DURATION_MS);
 
     // Create session on the first chunk rotation (lazy — only for long recordings)
     if (!sessionIdRef.current) {
@@ -723,26 +500,19 @@ export default function NewRecordingScreen({
     }
 
     // Fire-and-forget upload of the completed chunk
-    if (oldUri && sessionIdRef.current) {
+    if (sessionIdRef.current) {
       silentChunkUpload(oldUri, partIndex, sessionIdRef.current).catch(() => {});
     }
   };
 
   const handleStop = async () => {
-    // Cancel pending auto-chunk and interruption-recovery timers
+    // Cancel pending auto-chunk timer
     if (chunkTimeoutRef.current) {
       clearTimeout(chunkTimeoutRef.current);
       chunkTimeoutRef.current = null;
     }
-    if (unexpectedStopTimerRef.current) {
-      clearTimeout(unexpectedStopTimerRef.current);
-      unexpectedStopTimerRef.current = null;
-    }
-    isRestartingRef.current = false;
 
-    // Use ref so we get the latest chunk even if React state hasn't flushed yet
-    const rec = recordingRef.current;
-    if (!rec) return;
+    if (!isRecordingRef.current) return;
 
     try {
       setState('stopping');
@@ -752,33 +522,16 @@ export default function NewRecordingScreen({
         durationTimeoutRef.current = null;
       }
 
-      let uri: string | null = null;
-
-      // Try to stop and unload, but handle "already unloaded" error gracefully
-      try {
-        await rec.stopAndUnloadAsync();
-        uri = rec.getURI();
-      } catch (err) {
-        // If error is about already unloaded, try to get URI anyway
-        if (err instanceof Error && err.message.includes('already been unloaded')) {
-          console.log('Recording already unloaded, getting URI directly');
-          uri = rec.getURI();
-        } else {
-          // For other errors, try to get URI before throwing
-          uri = rec.getURI();
-          if (!uri) {
-            throw err;
-          }
-        }
-      }
+      // Stop the native recorder and get the final chunk URI
+      const uri = await nativeStop();
 
       if (!uri) {
         throw new Error('No recording URI returned');
       }
 
       deactivateKeepAwake(KEEP_AWAKE_TAG);
-      setRecording(null);
-      recordingRef.current = null;
+      setRecording(false);
+      recordingUriRef.current = null;
 
       // Start upload flow
       await uploadFlow(uri);
@@ -806,22 +559,14 @@ export default function NewRecordingScreen({
                 clearTimeout(chunkTimeoutRef.current);
                 chunkTimeoutRef.current = null;
               }
-              if (unexpectedStopTimerRef.current) {
-                clearTimeout(unexpectedStopTimerRef.current);
-                unexpectedStopTimerRef.current = null;
-              }
-              isRestartingRef.current = false;
               isRecordingRef.current = false;
-              if (recording) {
-                await recording.stopAndUnloadAsync();
-                const uri = recording.getURI();
-                if (uri) {
-                  await FileSystem.deleteAsync(uri, { idempotent: true });
-                }
-                deactivateKeepAwake(KEEP_AWAKE_TAG);
-                setRecording(null);
-                recordingRef.current = null;
+              const uri = await nativeStop();
+              if (uri) {
+                await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
               }
+              deactivateKeepAwake(KEEP_AWAKE_TAG);
+              setRecording(false);
+              recordingUriRef.current = null;
               await AsyncStorage.removeItem(STALE_RECORDING_KEY).catch(() => {});
               sessionIdRef.current = null;
               onCancel();
@@ -1141,7 +886,7 @@ export default function NewRecordingScreen({
             <View style={styles.ringMid}>
               <TouchableOpacity
                 style={styles.recordButton}
-                onPress={startRecording}
+                onPress={startRecordingHandler}
                 disabled={state === 'requesting-permission'}
                 activeOpacity={0.85}
               >
