@@ -23,7 +23,7 @@ import {
   AppState,
   ScrollView,
 } from 'react-native';
-import { Audio } from 'expo-av';
+import { Audio, InterruptionModeIOS, InterruptionModeAndroid } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import Constants from 'expo-constants';
 import { useAuth } from '../contexts/AuthContext';
@@ -226,10 +226,13 @@ export default function VoiceProfileScreen({ onBack, onPaywall }: VoiceProfileSc
       }
 
       console.log('Permission granted, configuring audio mode...');
-      // Configure audio mode
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
+        staysActiveInBackground: true,
+        interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+        interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
+        shouldDuckAndroid: false,
       });
 
       console.log('Creating recording...');

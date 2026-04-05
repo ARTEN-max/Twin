@@ -26,7 +26,7 @@ import {
 } from 'react-native';
 import { theme } from '../theme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Audio } from 'expo-av';
+import { Audio, InterruptionModeIOS, InterruptionModeAndroid } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import {
   createRecording,
@@ -82,6 +82,7 @@ export default function NewRecordingScreen({
   const isRecordingRef = useRef(false);
   const pollCancelledRef = useRef(false);
   const recordingRef = useRef<Audio.Recording | null>(null); // For use in callbacks without stale closure
+  const recordingStartTimeRef = useRef<number>(0); // Wall-clock start time for accurate timer
 
   // Animations
   const pulseScale = useRef(new Animated.Value(1)).current;
@@ -122,7 +123,7 @@ export default function NewRecordingScreen({
           .getStatusAsync()
           .then((status) => {
             if (!status.isRecording && isRecordingRef.current) {
-              // Recording was interrupted by the OS while backgrounded — clean up state
+              // Recording was killed by the OS — clean up
               isRecordingRef.current = false;
               if (durationTimeoutRef.current) {
                 clearTimeout(durationTimeoutRef.current);
@@ -133,6 +134,12 @@ export default function NewRecordingScreen({
               setState('idle');
               setDuration(0);
               durationRef.current = 0;
+            } else if (status.isRecording) {
+              // Still recording — recalibrate timer from wall clock so it shows
+              // the correct duration after being paused in background
+              const elapsed = Math.floor((Date.now() - recordingStartTimeRef.current) / 1000);
+              durationRef.current = elapsed;
+              setDuration(elapsed);
             }
           })
           .catch(() => {});
@@ -144,34 +151,26 @@ export default function NewRecordingScreen({
     };
   }, []);
 
-  // Handle timer based on recording state
+  // Handle timer based on recording state.
+  // Uses wall-clock time (Date.now) so the counter stays accurate after the app
+  // is backgrounded — JS setTimeout is paused in background, but Date.now is not.
   useEffect(() => {
     if (state === 'recording' && recording) {
-      // Start timer when recording state is active (only if not already running)
       if (!durationTimeoutRef.current && isRecordingRef.current) {
-        durationRef.current = 0;
-        setDuration(0);
         const scheduleNextTick = () => {
-          // Check both ref and state to ensure we're still recording
           if (isRecordingRef.current) {
-            durationRef.current += 1;
-            const newDuration = durationRef.current;
-            console.log('⏱️ Timer tick - Setting duration to:', newDuration);
-            setDuration(newDuration);
-
-            // Schedule next tick
-            durationTimeoutRef.current = setTimeout(scheduleNextTick, 1000);
+            // Read elapsed seconds from wall clock, not from a counter
+            const elapsed = Math.floor((Date.now() - recordingStartTimeRef.current) / 1000);
+            durationRef.current = elapsed;
+            setDuration(elapsed);
+            durationTimeoutRef.current = setTimeout(scheduleNextTick, 500); // 500ms for snappier updates
           } else {
-            console.log('⏱️ Timer stopped - isRecordingRef is false');
             durationTimeoutRef.current = null;
           }
         };
-        // Start the first tick
-        durationTimeoutRef.current = setTimeout(scheduleNextTick, 1000);
-        console.log('✅ Duration timer started in useEffect');
+        durationTimeoutRef.current = setTimeout(scheduleNextTick, 500);
       }
     } else if (state !== 'recording') {
-      // Cleanup when not recording
       isRecordingRef.current = false;
       if (durationTimeoutRef.current) {
         clearTimeout(durationTimeoutRef.current);
@@ -305,11 +304,16 @@ export default function NewRecordingScreen({
         return; // state is already set to 'mic-denied'
       }
 
-      // Configure audio mode for background recording
+      // Configure audio mode for background recording.
+      // DoNotMix tells iOS this is a high-priority audio session that should not be
+      // interrupted by notifications, music, or other apps playing audio.
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
-        staysActiveInBackground: true, // Allow recording when app is in background
+        staysActiveInBackground: true,
+        interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+        interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
+        shouldDuckAndroid: false,
       });
 
       // Create and start recording.
@@ -328,12 +332,12 @@ export default function NewRecordingScreen({
 
       setRecording(newRecording);
       recordingRef.current = newRecording;
-      durationRef.current = 0; // Reset ref
-      setDuration(0); // Reset duration when starting
+      durationRef.current = 0;
+      recordingStartTimeRef.current = Date.now(); // Capture wall-clock start time
+      setDuration(0);
       isRecordingRef.current = true;
-      pollCancelledRef.current = false; // Reset for new recording session
+      pollCancelledRef.current = false;
 
-      // Set state - useEffect will handle starting the timer
       setState('recording');
     } catch (err) {
       console.error('Error starting recording:', err);
