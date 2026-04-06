@@ -32,6 +32,7 @@ config.resolver.unstable_enablePackageExports = true;
 
 config.resolver.extraNodeModules = {
   '@komuchi/shared': sharedDistPath,
+  'background-recorder': path.resolve(projectRoot, 'modules/background-recorder'),
 };
 
 const originalResolveRequest = config.resolver.resolveRequest;

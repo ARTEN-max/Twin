@@ -1,6 +1,6 @@
 require 'json'
 
-package = JSON.parse(File.read(File.join(__dir__, 'package.json')))
+package = JSON.parse(File.read(File.join(File.dirname(__dir__), 'package.json')))
 
 Pod::Spec.new do |s|
   s.name           = 'background-recorder'
@@ -13,11 +13,9 @@ Pod::Spec.new do |s|
   s.swift_version  = '5.4'
   s.source         = { git: '' }
 
-  s.static_framework = true
-
   s.dependency 'ExpoModulesCore'
 
-  s.source_files = 'ios/**/*.{swift,h,m}'
+  s.source_files = '**/*.{swift,h,m}'
 
   s.frameworks = ['AVFoundation']
 end
