@@ -39,6 +39,9 @@ RUN pnpm --filter=@komuchi/api build
 FROM base AS runtime
 ENV NODE_ENV=production
 
+# Install ffmpeg for audio transcoding (chunking long recordings for Whisper)
+RUN apk add --no-cache ffmpeg
+
 # Copy built output and dependencies
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/package.json ./

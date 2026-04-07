@@ -40,10 +40,10 @@ final class BackgroundAudioRecorder: NSObject, AVAudioRecorderDelegate {
     let url = newRecordingURL()
     let settings: [String: Any] = [
       AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-      AVSampleRateKey: 44100,
+      AVSampleRateKey: 16000,   // 16kHz is sufficient for speech / Whisper
       AVNumberOfChannelsKey: 1,
-      AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
-      AVEncoderBitRateKey: 128000,
+      AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue,
+      AVEncoderBitRateKey: 32000, // 32kbps ≈ 14 MB/hour, well under Whisper's 25 MB limit
     ]
 
     let rec = try AVAudioRecorder(url: url, settings: settings)
@@ -77,10 +77,10 @@ final class BackgroundAudioRecorder: NSObject, AVAudioRecorderDelegate {
     let url = newRecordingURL()
     let settings: [String: Any] = [
       AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-      AVSampleRateKey: 44100,
+      AVSampleRateKey: 16000,   // 16kHz is sufficient for speech / Whisper
       AVNumberOfChannelsKey: 1,
-      AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
-      AVEncoderBitRateKey: 128000,
+      AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue,
+      AVEncoderBitRateKey: 32000, // 32kbps ≈ 14 MB/hour, well under Whisper's 25 MB limit
     ]
     let nextRec = try AVAudioRecorder(url: url, settings: settings)
     nextRec.delegate = self
@@ -182,6 +182,10 @@ final class BackgroundAudioRecorder: NSObject, AVAudioRecorderDelegate {
                    name: AVAudioSession.routeChangeNotification, object: nil)
     nc.addObserver(self, selector: #selector(handleMediaServicesReset),
                    name: AVAudioSession.mediaServicesWereResetNotification, object: nil)
+    // expo-av's EXAudioSessionManager calls [AVAudioSession setActive:NO] when the app
+    // enters the background, which kills our recorder. We re-assert the session here.
+    nc.addObserver(self, selector: #selector(handleAppBackground),
+                   name: UIApplication.didEnterBackgroundNotification, object: nil)
   }
 
   @objc private func handleInterruption(_ notification: Notification) {
@@ -240,6 +244,26 @@ final class BackgroundAudioRecorder: NSObject, AVAudioRecorderDelegate {
       _ = uri
     } catch {
       onError?("Media services reset — recovery failed: \(error.localizedDescription)")
+    }
+  }
+
+  @objc private func handleAppBackground() {
+    guard isRecording else { return }
+    // expo-av deactivates the global AVAudioSession when the app backgrounds.
+    // Re-activate it immediately so our recorder keeps running through lock screen.
+    // The 150 ms delay lets expo-av finish its setActive:NO call first.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+      guard let self = self, self.isRecording else { return }
+      do {
+        try self.configureAudioSession()
+        // If the recorder stopped, restart it
+        if let rec = self.recorder, !rec.isRecording {
+          rec.record()
+        }
+      } catch {
+        // Session re-activation failed — attempt full recovery
+        self.attemptRecovery()
+      }
     }
   }
 }
