@@ -71,6 +71,7 @@ const envSchema = z.object({
 
   // Optional server-side transcoding (for MediaRecorder webm/ogg compatibility)
   ENABLE_FFMPEG_TRANSCODE: z.coerce.boolean().default(false),
+  TESTER_UIDS: z.string().optional(), // comma-separated Firebase UIDs with unlimited PRO access
 
   // Sentry (optional)
   SENTRY_DSN: z.string().url().optional(),

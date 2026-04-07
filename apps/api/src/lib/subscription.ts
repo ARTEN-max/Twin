@@ -6,6 +6,17 @@
  */
 
 import { db } from './db.js';
+import { getEnv } from './env.js';
+
+// UIDs listed in TESTER_UIDS (comma-separated) always get PRO limits
+function isTester(userId: string): boolean {
+  const raw = getEnv().TESTER_UIDS ?? '';
+  return raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .includes(userId);
+}
 
 // ─── Tier limits ──────────────────────────────────────────────
 
@@ -59,6 +70,10 @@ export async function checkAndIncrementRecordingCount(userId: string): Promise<{
 
   if (!user) {
     return { allowed: false, used: 0, limit: 0, tier: 'FREE' };
+  }
+
+  if (isTester(userId)) {
+    return { allowed: true, used: user.recordingsThisMonth, limit: null, tier: 'PRO' };
   }
 
   const limits = getTierLimits(user.subscriptionTier);
