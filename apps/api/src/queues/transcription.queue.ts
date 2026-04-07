@@ -85,11 +85,14 @@ export function startTranscriptionWorker(): Worker<
             fileSize: true,
           },
         });
+        // Chunking splits audio via ffmpeg — only attempt if ffmpeg is available.
+        // Without ffmpeg, pass the URL directly to the provider (works for m4a/mp4/wav).
         const shouldChunkTranscription =
-          providerName === 'openai' ||
-          normalizedMime === 'audio/webm' ||
-          normalizedMime === 'audio/ogg' ||
-          (recordingMeta?.fileSize ?? 0) >= LONG_RECORDING_FILE_SIZE_BYTES;
+          env.ENABLE_FFMPEG_TRANSCODE &&
+          (providerName === 'openai' ||
+            normalizedMime === 'audio/webm' ||
+            normalizedMime === 'audio/ogg' ||
+            (recordingMeta?.fileSize ?? 0) >= LONG_RECORDING_FILE_SIZE_BYTES);
 
         log('Transcribing audio');
         const transcriptionResult = shouldChunkTranscription
