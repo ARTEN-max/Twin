@@ -36,7 +36,7 @@ interface WhisperSegment {
 }
 
 const LONG_RECORDING_FILE_SIZE_BYTES = 75 * 1024 * 1024;
-const TRANSCRIPTION_CHUNK_SECONDS = 15 * 60;
+const TRANSCRIPTION_CHUNK_SECONDS = 10 * 60; // 10-min WAV chunks = 19.2 MB, safely under Whisper's 25 MB limit
 const MAX_DIARIZATION_DURATION_SEC = 90 * 60;
 
 // ============================================
