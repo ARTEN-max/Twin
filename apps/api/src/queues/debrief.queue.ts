@@ -8,6 +8,7 @@ import {
 import { generateDebrief, generateProactiveOpener } from '../lib/ai/index.js';
 import { db } from '../lib/db.js';
 import { debriefQueue } from './queues.js';
+import { maybeEnqueueSessionDebrief } from './session-debrief.queue.js';
 import { getOrCreateChatSession, addChatMessage } from '../services/chat.service.js';
 
 // Re-export queue for convenience
@@ -28,7 +29,14 @@ export function startDebriefWorker(): Worker<DebriefJobData, DebriefResult> | nu
   debriefWorker = new Worker<DebriefJobData, DebriefResult>(
     QUEUE_NAMES.DEBRIEF,
     async (job: Job<DebriefJobData, DebriefResult>) => {
-      const { recordingId, jobId, transcriptText, recordingMode, recordingTitle, recordingDuration } = job.data;
+      const {
+        recordingId,
+        jobId,
+        transcriptText,
+        recordingMode,
+        recordingTitle,
+        recordingDuration,
+      } = job.data;
       const log = (msg: string) => console.log(`[Debrief:${job.id}] ${msg}`);
 
       try {
@@ -67,8 +75,13 @@ export function startDebriefWorker(): Worker<DebriefJobData, DebriefResult> | nu
           const meetsQualityGate = wordCount >= 50 && duration >= 30;
 
           if (meetsQualityGate) {
-            log(`Quality gate passed (words: ${wordCount}, duration: ${duration}s) — generating proactive opener`);
-            const openerText = await generateProactiveOpener(debriefResult.markdown, recordingTitle);
+            log(
+              `Quality gate passed (words: ${wordCount}, duration: ${duration}s) — generating proactive opener`
+            );
+            const openerText = await generateProactiveOpener(
+              debriefResult.markdown,
+              recordingTitle
+            );
 
             if (openerText) {
               // Save to the user's daily chat session
@@ -80,11 +93,15 @@ export function startDebriefWorker(): Worker<DebriefJobData, DebriefResult> | nu
               log('AI returned SKIP — no proactive opener for this recording');
             }
           } else {
-            log(`Quality gate failed (words: ${wordCount}, duration: ${duration}s) — skipping proactive opener`);
+            log(
+              `Quality gate failed (words: ${wordCount}, duration: ${duration}s) — skipping proactive opener`
+            );
           }
         } catch (openerError) {
           // Never fail the debrief job because of an opener error
-          log(`Proactive opener error (non-fatal): ${openerError instanceof Error ? openerError.message : 'Unknown'}`);
+          log(
+            `Proactive opener error (non-fatal): ${openerError instanceof Error ? openerError.message : 'Unknown'}`
+          );
         }
         await job.updateProgress(90);
 
@@ -93,10 +110,26 @@ export function startDebriefWorker(): Worker<DebriefJobData, DebriefResult> | nu
 
         // Step 6: Mark recording as complete
         log('Marking recording as complete');
-        await db.recording.update({
+        const completedRecording = await db.recording.update({
           where: { id: recordingId },
           data: { status: 'complete' },
+          select: { sessionId: true, userId: true },
         });
+
+        // Step 7: If this recording belongs to a session and the client has
+        // already signalled the session is finished, check whether all chunks
+        // are done and fire the session-level debrief. This makes the trigger
+        // durable: even if the app is killed before its in-flight call to
+        // /sessions/:id/debrief succeeds, the worker will eventually pick it up
+        // — provided the client has called the endpoint at some earlier point.
+        if (completedRecording.sessionId) {
+          await maybeEnqueueSessionDebrief(
+            completedRecording.sessionId,
+            completedRecording.userId,
+            log
+          );
+        }
+
         await job.updateProgress(100);
 
         log('Debrief job complete');

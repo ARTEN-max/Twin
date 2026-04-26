@@ -121,13 +121,22 @@ export const sessionsRoutes: FastifyPluginAsync = async (app) => {
       return reply.send({ status: 'processing', message: 'Session debrief is being generated' });
     }
 
+    // Record the client's intent to debrief regardless of chunk state. The
+    // debrief worker will fire the session debrief once all chunks finish.
+    // This makes the trigger durable across app kills and chunk-still-processing
+    // races — the client doesn't need to retry.
+    await db.session.update({
+      where: { id },
+      data: { debriefRequestedAt: new Date() },
+    });
+
     // Check if all chunks have completed processing
     type SessionChunk = (typeof session.recordings)[number];
     const pendingChunks = session.recordings.filter((r: SessionChunk) => r.status !== 'complete');
     if (pendingChunks.length > 0) {
       return reply.status(202).send({
         status: 'pending',
-        message: `${pendingChunks.length} recording(s) still processing. Retry in a few seconds.`,
+        message: `${pendingChunks.length} recording(s) still processing. Debrief will start automatically when ready.`,
         pendingCount: pendingChunks.length,
         totalCount: session.recordings.length,
       });
@@ -137,10 +146,15 @@ export const sessionsRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(400).send({ error: 'Bad Request', message: 'Session has no recordings' });
     }
 
-    // Mark session as processing and enqueue the job
-    await db.session.update({ where: { id }, data: { status: 'processing' } });
+    // All chunks already complete — race-safe transition + enqueue.
+    const claim = await db.session.updateMany({
+      where: { id, status: 'pending' },
+      data: { status: 'processing' },
+    });
 
-    await enqueueSessionDebriefJob({ sessionId: id, userId });
+    if (claim.count === 1) {
+      await enqueueSessionDebriefJob({ sessionId: id, userId });
+    }
 
     return reply.send({
       status: 'processing',

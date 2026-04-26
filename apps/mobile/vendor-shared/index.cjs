@@ -33,6 +33,7 @@ __export(index_exports, {
   createJobSchema: () => createJobSchema,
   createRecording: () => createRecording,
   createRecordingSchema: () => createRecordingSchema,
+  createSession: () => createSession,
   createTranscriptSchema: () => createTranscriptSchema,
   createUserSchema: () => createUserSchema,
   debriefSchema: () => debriefSchema,
@@ -46,6 +47,7 @@ __export(index_exports, {
   getRecording: () => getRecording,
   getRecordingResult: () => getRecordingResult,
   getRecordingStatus: () => getRecordingStatus,
+  getSession: () => getSession,
   getVoiceProfileStatus: () => getVoiceProfileStatus,
   jobSchema: () => jobSchema,
   listRecordings: () => listRecordings,
@@ -65,6 +67,7 @@ __export(index_exports, {
   transcriptSchema: () => transcriptSchema,
   transcriptSegmentDetailSchema: () => transcriptSegmentDetailSchema,
   transcriptSegmentSchema: () => transcriptSegmentSchema,
+  triggerSessionDebrief: () => triggerSessionDebrief,
   updateRecordingSchema: () => updateRecordingSchema,
   uploadRecordingFile: () => uploadRecordingFile,
   userSchema: () => userSchema,
@@ -330,8 +333,29 @@ async function createRecording(userId, params) {
     body: JSON.stringify({
       title: params.title,
       mode: params.mode || "general",
-      mimeType: params.mimeType
+      mimeType: params.mimeType,
+      ...params.sessionId != null && { sessionId: params.sessionId },
+      ...params.chunkIndex != null && { chunkIndex: params.chunkIndex }
     })
+  });
+}
+async function createSession(userId, title) {
+  return apiRequest("/api/sessions", {
+    method: "POST",
+    headers: { "x-user-id": userId },
+    body: JSON.stringify(title ? { title } : {})
+  });
+}
+async function getSession(userId, sessionId) {
+  return apiRequest(`/api/sessions/${sessionId}`, {
+    headers: { "x-user-id": userId }
+  });
+}
+async function triggerSessionDebrief(userId, sessionId) {
+  return apiRequest(`/api/sessions/${sessionId}/debrief`, {
+    method: "POST",
+    headers: { "x-user-id": userId },
+    body: JSON.stringify({})
   });
 }
 async function uploadRecordingFile(userId, recordingId, fileData, contentType) {
@@ -902,6 +926,7 @@ function toRecordingDetail(recording) {
   createJobSchema,
   createRecording,
   createRecordingSchema,
+  createSession,
   createTranscriptSchema,
   createUserSchema,
   debriefSchema,
@@ -915,6 +940,7 @@ function toRecordingDetail(recording) {
   getRecording,
   getRecordingResult,
   getRecordingStatus,
+  getSession,
   getVoiceProfileStatus,
   jobSchema,
   listRecordings,
@@ -934,6 +960,7 @@ function toRecordingDetail(recording) {
   transcriptSchema,
   transcriptSegmentDetailSchema,
   transcriptSegmentSchema,
+  triggerSessionDebrief,
   updateRecordingSchema,
   uploadRecordingFile,
   userSchema,

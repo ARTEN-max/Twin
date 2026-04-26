@@ -1,5 +1,6 @@
 import ExpoModulesCore
 import AVFoundation
+import Speech
 
 // MARK: - BackgroundAudioRecorder Singleton
 
@@ -7,6 +8,10 @@ import AVFoundation
 /// This singleton survives JS thread suspension — iOS keeps the audio session
 /// alive as long as `UIBackgroundModes: ["audio"]` is declared and the session
 /// is active when the screen locks.
+///
+/// Owns its own rotation timer so chunks are produced even while the screen is
+/// locked and the JS thread is suspended. The timer fires on the main run loop;
+/// active audio I/O keeps the run loop running through lock.
 final class BackgroundAudioRecorder: NSObject, AVAudioRecorderDelegate {
 
   static let shared = BackgroundAudioRecorder()
@@ -16,10 +21,14 @@ final class BackgroundAudioRecorder: NSObject, AVAudioRecorderDelegate {
   private var recordingStartTime: Date?
   private(set) var isRecording = false
 
-  // Callbacks fired back to the Expo module
-  var onChunkReady: ((String) -> Void)?    // fired when stopChunk completes → uri
-  var onStopped: ((String?) -> Void)?      // fired when stopRecording completes → uri?
-  var onError: ((String) -> Void)?         // any interruption / session error
+  private var rotationTimer: Timer?
+  private var rotationIntervalSec: TimeInterval = 0
+  private var nextPartIndex: Int = 1
+
+  // Callbacks fired back to the Expo module which forwards them as events.
+  // (uri, partIndex) for rotated chunks.
+  var onChunkRotated: ((String, Int) -> Void)?
+  var onError: ((String) -> Void)?
 
   private override init() {
     super.init()
@@ -32,86 +41,57 @@ final class BackgroundAudioRecorder: NSObject, AVAudioRecorderDelegate {
 
   // MARK: - Public API
 
-  /// Configures the audio session and starts recording to a new timestamped file.
-  /// Returns the file URI on success.
-  func start() throws -> String {
+  /// Starts recording. If `rotationIntervalSec > 0`, schedules a timer that
+  /// stops the current chunk and starts a new one every `rotationIntervalSec`,
+  /// firing `onChunkRotated` for each finished chunk.
+  func start(rotationIntervalSec: Double) throws -> String {
     try configureAudioSession()
 
-    let url = newRecordingURL()
-    let settings: [String: Any] = [
-      AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-      AVSampleRateKey: 16000,   // 16kHz is sufficient for speech / Whisper
-      AVNumberOfChannelsKey: 1,
-      AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue,
-      AVEncoderBitRateKey: 32000, // 32kbps ≈ 14 MB/hour, well under Whisper's 25 MB limit
-    ]
+    nextPartIndex = 1
+    self.rotationIntervalSec = rotationIntervalSec
 
-    let rec = try AVAudioRecorder(url: url, settings: settings)
-    rec.delegate = self
-    rec.isMeteringEnabled = false
+    let url = try beginRecording()
+    isRecording = true
 
-    guard rec.record() else {
-      throw NSError(domain: "BackgroundRecorder", code: 1,
-                    userInfo: [NSLocalizedDescriptionKey: "AVAudioRecorder.record() returned false"])
+    if rotationIntervalSec > 0 {
+      scheduleRotationTimer()
     }
 
-    recorder = rec
-    currentFileURL = url
-    recordingStartTime = Date()
-    isRecording = true
     return url.absoluteString
   }
 
-  /// Stops the current chunk, returns the file URI, then immediately starts a new chunk.
-  /// Keeps the AVAudioSession active — no gap, no re-activation.
+  /// Manually rotate chunks. Usually unnecessary now that rotation runs in the
+  /// timer, but kept for tests and forced-rotation callers.
   func stopChunk() throws -> String {
-    guard let rec = recorder, isRecording else {
+    guard let _ = recorder, isRecording else {
       throw NSError(domain: "BackgroundRecorder", code: 2,
                     userInfo: [NSLocalizedDescriptionKey: "Not recording"])
     }
-
-    rec.stop()
-    let finishedURI = currentFileURL?.absoluteString ?? ""
-
-    // Start next chunk immediately — same session, same thread
-    let url = newRecordingURL()
-    let settings: [String: Any] = [
-      AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-      AVSampleRateKey: 16000,   // 16kHz is sufficient for speech / Whisper
-      AVNumberOfChannelsKey: 1,
-      AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue,
-      AVEncoderBitRateKey: 32000, // 32kbps ≈ 14 MB/hour, well under Whisper's 25 MB limit
-    ]
-    let nextRec = try AVAudioRecorder(url: url, settings: settings)
-    nextRec.delegate = self
-    nextRec.isMeteringEnabled = false
-
-    guard nextRec.record() else {
-      isRecording = false
-      throw NSError(domain: "BackgroundRecorder", code: 3,
-                    userInfo: [NSLocalizedDescriptionKey: "Failed to start next chunk"])
-    }
-
-    recorder = nextRec
-    currentFileURL = url
-    recordingStartTime = Date()
-    return finishedURI
+    return try rotateChunkInternal()
   }
 
-  /// Stops recording entirely, deactivates the audio session, returns the last file URI.
-  func stop() -> String? {
+  /// Stops recording entirely. Invalidates the rotation timer, deactivates the
+  /// audio session, returns the final chunk's URI and the partIndex it should
+  /// be uploaded under.
+  func stop() -> (uri: String, partIndex: Int)? {
+    rotationTimer?.invalidate()
+    rotationTimer = nil
+
     guard let rec = recorder else { return nil }
     rec.stop()
     let uri = currentFileURL?.absoluteString
+    let partIndex = nextPartIndex
+
     recorder = nil
     currentFileURL = nil
     recordingStartTime = nil
     isRecording = false
 
-    // Deactivate session so other apps can reclaim audio
     try? AVAudioSession.sharedInstance().setActive(false,
       options: .notifyOthersOnDeactivation)
-    return uri
+
+    guard let finalURI = uri else { return nil }
+    return (finalURI, partIndex)
   }
 
   /// Synchronous status snapshot.
@@ -126,7 +106,142 @@ final class BackgroundAudioRecorder: NSObject, AVAudioRecorderDelegate {
       "isRecording": isRecording,
       "duration": duration,
       "uri": currentFileURL?.absoluteString ?? NSNull(),
+      "nextPartIndex": nextPartIndex,
     ]
+  }
+
+  // MARK: - Internal recording lifecycle
+
+  /// Builds a new AVAudioRecorder and starts it. Caller updates `isRecording`.
+  /// Returns the URL the recorder is writing to.
+  @discardableResult
+  private func beginRecording() throws -> URL {
+    let url = newRecordingURL()
+    let rec = try AVAudioRecorder(url: url, settings: recorderSettings())
+    rec.delegate = self
+    rec.isMeteringEnabled = false
+
+    guard rec.record() else {
+      throw NSError(domain: "BackgroundRecorder", code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: "AVAudioRecorder.record() returned false"])
+    }
+
+    recorder = rec
+    currentFileURL = url
+    recordingStartTime = Date()
+    return url
+  }
+
+  /// Stops the current chunk and begins the next one in a single atomic step.
+  /// Returns the URI of the finished chunk; the new chunk is already running.
+  /// Fires `onChunkRotated` with the finished chunk's URI and partIndex.
+  @discardableResult
+  private func rotateChunkInternal() throws -> String {
+    guard let rec = recorder else {
+      throw NSError(domain: "BackgroundRecorder", code: 2,
+                    userInfo: [NSLocalizedDescriptionKey: "Not recording"])
+    }
+
+    rec.stop()
+    let finishedURI = currentFileURL?.absoluteString ?? ""
+    let finishedPart = nextPartIndex
+    nextPartIndex += 1
+
+    do {
+      _ = try beginRecording()
+    } catch {
+      isRecording = false
+      throw error
+    }
+
+    onChunkRotated?(finishedURI, finishedPart)
+    return finishedURI
+  }
+
+  private func scheduleRotationTimer() {
+    rotationTimer?.invalidate()
+    // Use a Timer scheduled on the main run loop. Active audio recording keeps
+    // the run loop alive across lock screen / background, so the timer fires
+    // even while the JS thread is suspended.
+    let timer = Timer(timeInterval: rotationIntervalSec, repeats: true) { [weak self] _ in
+      guard let self = self, self.isRecording else { return }
+      do {
+        _ = try self.rotateChunkInternal()
+      } catch {
+        self.onError?("Rotation failed: \(error.localizedDescription)")
+      }
+    }
+    RunLoop.main.add(timer, forMode: .common)
+    rotationTimer = timer
+  }
+
+  private func recorderSettings() -> [String: Any] {
+    return [
+      AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+      AVSampleRateKey: 16000,   // 16kHz is sufficient for speech / Whisper
+      AVNumberOfChannelsKey: 1,
+      AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue,
+      AVEncoderBitRateKey: 32000, // 32kbps ≈ 14 MB/hour, well under Whisper's 25 MB limit
+    ]
+  }
+
+  // MARK: - On-device transcription (SFSpeechRecognizer)
+  //
+  // This is the cost-floor lever: every chunk transcribed on-device is one
+  // chunk we don't pay Whisper for. Caller passes the chunk's file URL and
+  // gets back the recognized text. Server-side Whisper remains as the safety
+  // net — if recognition fails or returns empty, the server transcribes.
+
+  /// Asks the user for speech-recognition permission. Idempotent; safe to call
+  /// repeatedly. Resolves with the granted/denied/restricted/notDetermined raw
+  /// value so the caller can react in JS.
+  func requestSpeechAuthorization(completion: @escaping (SFSpeechRecognizerAuthorizationStatus) -> Void) {
+    SFSpeechRecognizer.requestAuthorization { status in
+      DispatchQueue.main.async { completion(status) }
+    }
+  }
+
+  /// Transcribes a previously-recorded audio file on-device. Forces
+  /// `requiresOnDeviceRecognition = true` when supported so audio never
+  /// leaves the device for the Apple speech servers (privacy + the whole
+  /// point of this code path is zero per-minute cost).
+  func transcribeFile(at url: URL, completion: @escaping (Result<String, Error>) -> Void) {
+    requestSpeechAuthorization { status in
+      guard status == .authorized else {
+        completion(.failure(NSError(domain: "BackgroundRecorder", code: 10,
+          userInfo: [NSLocalizedDescriptionKey: "Speech recognition not authorized (status=\(status.rawValue))"])))
+        return
+      }
+
+      guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US")),
+            recognizer.isAvailable else {
+        completion(.failure(NSError(domain: "BackgroundRecorder", code: 11,
+          userInfo: [NSLocalizedDescriptionKey: "Speech recognizer not available"])))
+        return
+      }
+
+      let request = SFSpeechURLRecognitionRequest(url: url)
+      request.shouldReportPartialResults = false
+      if recognizer.supportsOnDeviceRecognition {
+        request.requiresOnDeviceRecognition = true
+      }
+
+      // Guard against the recognition callback firing more than once. iOS may
+      // deliver an intermediate result + an error; we only resolve once.
+      var resolved = false
+      recognizer.recognitionTask(with: request) { result, error in
+        if resolved { return }
+        if let error = error {
+          resolved = true
+          completion(.failure(error))
+          return
+        }
+        if let result = result, result.isFinal {
+          resolved = true
+          completion(.success(result.bestTranscription.formattedString))
+        }
+      }
+    }
   }
 
   // MARK: - AVAudioRecorderDelegate
@@ -137,8 +252,6 @@ final class BackgroundAudioRecorder: NSObject, AVAudioRecorderDelegate {
   }
 
   func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
-    // Normal finish (we called stop()) — handled in stopChunk/stop.
-    // Unexpected finish (interruption ended recorder): try to recover.
     if isRecording && !flag {
       onError?("Recording finished unexpectedly — attempting restart")
       attemptRecovery()
@@ -164,10 +277,11 @@ final class BackgroundAudioRecorder: NSObject, AVAudioRecorderDelegate {
   private func attemptRecovery() {
     guard isRecording else { return }
     do {
-      let uri = try start()
-      _ = uri // new recording started; JS will detect next stopChunk returning a new URI
+      _ = try beginRecording()
     } catch {
       isRecording = false
+      rotationTimer?.invalidate()
+      rotationTimer = nil
       onError?("Recovery failed: \(error.localizedDescription)")
     }
   }
@@ -182,8 +296,6 @@ final class BackgroundAudioRecorder: NSObject, AVAudioRecorderDelegate {
                    name: AVAudioSession.routeChangeNotification, object: nil)
     nc.addObserver(self, selector: #selector(handleMediaServicesReset),
                    name: AVAudioSession.mediaServicesWereResetNotification, object: nil)
-    // expo-av's EXAudioSessionManager calls [AVAudioSession setActive:NO] when the app
-    // enters the background, which kills our recorder. We re-assert the session here.
     nc.addObserver(self, selector: #selector(handleAppBackground),
                    name: UIApplication.didEnterBackgroundNotification, object: nil)
   }
@@ -195,14 +307,12 @@ final class BackgroundAudioRecorder: NSObject, AVAudioRecorderDelegate {
 
     switch type {
     case .began:
-      // Phone call, Siri, etc. — recorder pauses automatically
       break
 
     case .ended:
       guard let optionsValue = info[AVAudioSessionInterruptionOptionKey] as? UInt else { return }
       let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
       if options.contains(.shouldResume) && isRecording {
-        // Re-activate session and resume
         do {
           try configureAudioSession()
           recorder?.record()
@@ -221,7 +331,6 @@ final class BackgroundAudioRecorder: NSObject, AVAudioRecorderDelegate {
           let reasonValue = info[AVAudioSessionRouteChangeReasonKey] as? UInt,
           let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
 
-    // Headphones unplugged / Bluetooth device disconnected
     if reason == .oldDeviceUnavailable && isRecording {
       do {
         try configureAudioSession()
@@ -233,15 +342,14 @@ final class BackgroundAudioRecorder: NSObject, AVAudioRecorderDelegate {
   }
 
   @objc private func handleMediaServicesReset() {
-    // Media server crashed and reset — must rebuild everything
     guard isRecording else { return }
     recorder = nil
     currentFileURL = nil
     isRecording = false
     do {
       try configureAudioSession()
-      let uri = try start()
-      _ = uri
+      _ = try beginRecording()
+      isRecording = true
     } catch {
       onError?("Media services reset — recovery failed: \(error.localizedDescription)")
     }
@@ -249,19 +357,14 @@ final class BackgroundAudioRecorder: NSObject, AVAudioRecorderDelegate {
 
   @objc private func handleAppBackground() {
     guard isRecording else { return }
-    // expo-av deactivates the global AVAudioSession when the app backgrounds.
-    // Re-activate it immediately so our recorder keeps running through lock screen.
-    // The 150 ms delay lets expo-av finish its setActive:NO call first.
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
       guard let self = self, self.isRecording else { return }
       do {
         try self.configureAudioSession()
-        // If the recorder stopped, restart it
         if let rec = self.recorder, !rec.isRecording {
           rec.record()
         }
       } catch {
-        // Session re-activation failed — attempt full recovery
         self.attemptRecovery()
       }
     }
@@ -274,10 +377,26 @@ public class BackgroundRecorderModule: Module {
   public func definition() -> ModuleDefinition {
     Name("BackgroundRecorder")
 
-    // start() → Promise<string>  (file URI)
-    AsyncFunction("start") { (promise: Promise) in
+    Events("onChunkRotated", "onRecorderError")
+
+    OnCreate {
+      BackgroundAudioRecorder.shared.onChunkRotated = { [weak self] uri, partIndex in
+        self?.sendEvent("onChunkRotated", [
+          "uri": uri,
+          "partIndex": partIndex,
+        ])
+      }
+      BackgroundAudioRecorder.shared.onError = { [weak self] msg in
+        self?.sendEvent("onRecorderError", [
+          "message": msg,
+        ])
+      }
+    }
+
+    // start(rotationIntervalSec) → Promise<string>  (URI of first chunk)
+    AsyncFunction("start") { (rotationIntervalSec: Double, promise: Promise) in
       do {
-        let uri = try BackgroundAudioRecorder.shared.start()
+        let uri = try BackgroundAudioRecorder.shared.start(rotationIntervalSec: rotationIntervalSec)
         promise.resolve(uri)
       } catch {
         promise.reject("ERR_START", error.localizedDescription)
@@ -294,15 +413,57 @@ public class BackgroundRecorderModule: Module {
       }
     }
 
-    // stop() → Promise<string | null>  (URI of last file)
+    // stop() → Promise<{ uri, partIndex } | null>
     AsyncFunction("stop") { (promise: Promise) in
-      let uri = BackgroundAudioRecorder.shared.stop()
-      promise.resolve(uri)
+      if let result = BackgroundAudioRecorder.shared.stop() {
+        promise.resolve([
+          "uri": result.uri,
+          "partIndex": result.partIndex,
+        ])
+      } else {
+        promise.resolve(nil)
+      }
     }
 
-    // getStatus() → { isRecording: bool, duration: number, uri: string | null }
+    // getStatus() → { isRecording, duration, uri, nextPartIndex }
     Function("getStatus") {
       return BackgroundAudioRecorder.shared.status()
+    }
+
+    // requestSpeechAuthorization() → Promise<string>
+    // Returns one of: "authorized" | "denied" | "restricted" | "notDetermined"
+    AsyncFunction("requestSpeechAuthorization") { (promise: Promise) in
+      BackgroundAudioRecorder.shared.requestSpeechAuthorization { status in
+        let str: String
+        switch status {
+        case .authorized:    str = "authorized"
+        case .denied:        str = "denied"
+        case .restricted:    str = "restricted"
+        case .notDetermined: str = "notDetermined"
+        @unknown default:    str = "unknown"
+        }
+        promise.resolve(str)
+      }
+    }
+
+    // transcribeFile(uri) → Promise<string>
+    // On-device speech recognition. Resolves with the transcript text, or
+    // rejects if not authorized / recognizer unavailable / recognition errors.
+    // Callers should treat rejection as a soft failure and let the server
+    // fall back to Whisper.
+    AsyncFunction("transcribeFile") { (uri: String, promise: Promise) in
+      guard let url = URL(string: uri) else {
+        promise.reject("ERR_TRANSCRIBE", "Invalid URI: \(uri)")
+        return
+      }
+      BackgroundAudioRecorder.shared.transcribeFile(at: url) { result in
+        switch result {
+        case .success(let text):
+          promise.resolve(text)
+        case .failure(let error):
+          promise.reject("ERR_TRANSCRIBE", error.localizedDescription)
+        }
+      }
     }
   }
 }

@@ -31,6 +31,8 @@ interface CreateRecordingParams {
     title: string;
     mode?: 'general' | 'sales' | 'interview' | 'meeting';
     mimeType: string;
+    sessionId?: string;
+    chunkIndex?: number;
 }
 interface CreateRecordingResponse {
     recordingId: string;
@@ -44,8 +46,51 @@ interface CreateRecordingResponse {
  * Create a new recording and get presigned upload URL
  */
 declare function createRecording(userId: string, params: CreateRecordingParams): Promise<CreateRecordingResponse>;
+interface CreateSessionResponse {
+    sessionId: string;
+    title: string;
+    status: string;
+}
+interface SessionResponse {
+    sessionId: string;
+    title: string;
+    status: 'pending' | 'processing' | 'complete' | 'failed';
+    recordingCount: number;
+    completeCount: number;
+    totalDuration: number;
+    debrief: {
+        markdown: string;
+        sections: unknown[];
+    } | null;
+    createdAt: string;
+}
+interface TriggerSessionDebriefResponse {
+    status: 'pending' | 'processing' | 'complete';
+    message: string;
+    pendingCount?: number;
+    totalCount?: number;
+}
+/**
+ * Create a new recording session to group long-recording chunks
+ */
+declare function createSession(userId: string, title?: string): Promise<CreateSessionResponse>;
+/**
+ * Get session status and debrief
+ */
+declare function getSession(userId: string, sessionId: string): Promise<SessionResponse>;
+/**
+ * Trigger session-level debrief generation.
+ * Returns 202 if some chunks are still processing — safe to retry.
+ */
+declare function triggerSessionDebrief(userId: string, sessionId: string): Promise<TriggerSessionDebriefResponse>;
 interface CompleteUploadParams {
     fileSize?: number;
+    /**
+     * Optional client-side transcript (from iOS SFSpeechRecognizer or similar).
+     * When provided, the server skips its cloud transcription provider and uses
+     * this directly — eliminating per-minute Whisper cost.
+     */
+    transcript?: string;
 }
 interface CompleteUploadResponse {
     recordingId: string;
@@ -200,12 +245,14 @@ interface MeResponse {
         expiresAt: string | null;
         limits: {
             recordingsPerMonth: number | null;
-            maxRecordingMinutes: number | null;
+            maxMinutesPerRecording: number | null;
+            maxAudioMinutesPerMonth: number | null;
             chatMessagesPerDay: number | null;
             historyLimit: number | null;
         };
         usage: {
             recordingsThisMonth: number;
+            audioMinutesThisMonth: number;
             chatMessagesToday: number;
         };
     };
@@ -242,4 +289,4 @@ declare function registerPushToken(_userId: string, token: string): Promise<{
     message: string;
 }>;
 
-export { ApiClientError, type ChatMessage, type ChatSession, type CompleteUploadParams, type CompleteUploadResponse, type CreateRecordingParams, type CreateRecordingResponse, type ListRecordingsByDayParams, type ListRecordingsParams, type MeResponse, PaginatedResponse, Recording, type RecordingResultResponse, type RecordingStatusResponse, type SendChatMessageParams, TranscriptSegment, type VoiceProfileStatusResponse, acceptConsent, completeUpload, createRecording, deleteAccountApi, deleteRecordingApi, deleteVoiceProfile, enrollVoiceProfile, getChatSession, getMe, getRecording, getRecordingResult, getRecordingStatus, getVoiceProfileStatus, listRecordings, listRecordingsByDay, registerPushToken, retryTranscription, revokeConsent, sendChatMessage, setTokenProvider, uploadRecordingFile };
+export { ApiClientError, type ChatMessage, type ChatSession, type CompleteUploadParams, type CompleteUploadResponse, type CreateRecordingParams, type CreateRecordingResponse, type CreateSessionResponse, type ListRecordingsByDayParams, type ListRecordingsParams, type MeResponse, PaginatedResponse, Recording, type RecordingResultResponse, type RecordingStatusResponse, type SendChatMessageParams, type SessionResponse, TranscriptSegment, type TriggerSessionDebriefResponse, type VoiceProfileStatusResponse, acceptConsent, completeUpload, createRecording, createSession, deleteAccountApi, deleteRecordingApi, deleteVoiceProfile, enrollVoiceProfile, getChatSession, getMe, getRecording, getRecordingResult, getRecordingStatus, getSession, getVoiceProfileStatus, listRecordings, listRecordingsByDay, registerPushToken, retryTranscription, revokeConsent, sendChatMessage, setTokenProvider, triggerSessionDebrief, uploadRecordingFile };

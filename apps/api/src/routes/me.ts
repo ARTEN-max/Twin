@@ -67,12 +67,14 @@ export const meRoutes: FastifyPluginAsync = async (app) => {
           expiresAt: user.subscriptionExpiresAt?.toISOString() ?? null,
           limits: {
             recordingsPerMonth: limits.recordingsPerMonth,
-            maxRecordingMinutes: limits.maxRecordingMinutes,
+            maxMinutesPerRecording: limits.maxMinutesPerRecording,
+            maxAudioMinutesPerMonth: limits.maxAudioMinutesPerMonth,
             chatMessagesPerDay: limits.chatMessagesPerDay,
             historyLimit: limits.historyLimit,
           },
           usage: {
             recordingsThisMonth: user.recordingsThisMonth,
+            audioMinutesThisMonth: user.audioMinutesThisMonth,
             chatMessagesToday: user.chatMessagesToday,
           },
         },

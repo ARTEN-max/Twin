@@ -130,3 +130,45 @@ export async function enqueueSessionDebriefJob(data: SessionDebriefJobData): Pro
   });
   return job.id!;
 }
+
+/**
+ * If every recording in the session is complete and the client has signalled
+ * end-of-session via POST /sessions/:id/debrief, atomically claim the session
+ * and enqueue the session-level debrief.
+ *
+ * Race-safe: the conditional updateMany lets only one caller win when multiple
+ * chunks finish near-simultaneously. Called from both the transcription worker
+ * (for session chunks, which skip per-chunk debrief) and the debrief worker
+ * (for non-session chunks).
+ */
+export async function maybeEnqueueSessionDebrief(
+  sessionId: string,
+  userId: string,
+  log: (msg: string) => void
+): Promise<void> {
+  const session = await db.session.findUnique({
+    where: { id: sessionId },
+    select: {
+      status: true,
+      debriefRequestedAt: true,
+      recordings: { select: { status: true } },
+    },
+  });
+
+  if (!session) return;
+  if (session.status !== 'pending') return;
+  if (!session.debriefRequestedAt) return;
+
+  const allComplete = session.recordings.every((r) => r.status === 'complete');
+  if (!allComplete) return;
+
+  const claim = await db.session.updateMany({
+    where: { id: sessionId, status: 'pending' },
+    data: { status: 'processing' },
+  });
+
+  if (claim.count !== 1) return;
+
+  log(`All ${session.recordings.length} session chunks complete — enqueueing session debrief`);
+  await enqueueSessionDebriefJob({ sessionId, userId });
+}

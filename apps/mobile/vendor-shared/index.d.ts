@@ -91,6 +91,8 @@ interface CreateRecordingParams {
   title: string;
   mode?: 'general' | 'sales' | 'interview' | 'meeting';
   mimeType: string;
+  sessionId?: string;
+  chunkIndex?: number;
 }
 interface CreateRecordingResponse {
   recordingId: string;
@@ -107,8 +109,54 @@ declare function createRecording(
   userId: string,
   params: CreateRecordingParams
 ): Promise<CreateRecordingResponse>;
+interface CreateSessionResponse {
+  sessionId: string;
+  title: string;
+  status: string;
+}
+interface SessionResponse {
+  sessionId: string;
+  title: string;
+  status: 'pending' | 'processing' | 'complete' | 'failed';
+  recordingCount: number;
+  completeCount: number;
+  totalDuration: number;
+  debrief: {
+    markdown: string;
+    sections: unknown[];
+  } | null;
+  createdAt: string;
+}
+interface TriggerSessionDebriefResponse {
+  status: 'pending' | 'processing' | 'complete';
+  message: string;
+  pendingCount?: number;
+  totalCount?: number;
+}
+/**
+ * Create a new recording session to group long-recording chunks
+ */
+declare function createSession(userId: string, title?: string): Promise<CreateSessionResponse>;
+/**
+ * Get session status and debrief
+ */
+declare function getSession(userId: string, sessionId: string): Promise<SessionResponse>;
+/**
+ * Trigger session-level debrief generation.
+ * Returns 202 if some chunks are still processing — safe to retry.
+ */
+declare function triggerSessionDebrief(
+  userId: string,
+  sessionId: string
+): Promise<TriggerSessionDebriefResponse>;
 interface CompleteUploadParams {
   fileSize?: number;
+  /**
+   * Optional client-side transcript (from iOS SFSpeechRecognizer or similar).
+   * When provided, the server skips its cloud transcription provider and uses
+   * this directly — eliminating per-minute Whisper cost.
+   */
+  transcript?: string;
 }
 interface CompleteUploadResponse {
   recordingId: string;
@@ -295,12 +343,14 @@ interface MeResponse {
     expiresAt: string | null;
     limits: {
       recordingsPerMonth: number | null;
-      maxRecordingMinutes: number | null;
+      maxMinutesPerRecording: number | null;
+      maxAudioMinutesPerMonth: number | null;
       chatMessagesPerDay: number | null;
       historyLimit: number | null;
     };
     usage: {
       recordingsThisMonth: number;
+      audioMinutesThisMonth: number;
       chatMessagesToday: number;
     };
   };
@@ -351,6 +401,7 @@ export {
   type CompleteUploadResponse,
   type CreateRecordingParams,
   type CreateRecordingResponse,
+  type CreateSessionResponse,
   type ListRecordingsByDayParams,
   type ListRecordingsParams,
   type MeResponse,
@@ -359,11 +410,14 @@ export {
   type RecordingResultResponse,
   type RecordingStatusResponse,
   type SendChatMessageParams,
+  type SessionResponse,
   TranscriptSegment,
+  type TriggerSessionDebriefResponse,
   type VoiceProfileStatusResponse,
   acceptConsent,
   completeUpload,
   createRecording,
+  createSession,
   deleteAccountApi,
   deleteRecordingApi,
   deleteVoiceProfile,
@@ -373,6 +427,7 @@ export {
   getRecording,
   getRecordingResult,
   getRecordingStatus,
+  getSession,
   getVoiceProfileStatus,
   listRecordings,
   listRecordingsByDay,
@@ -381,5 +436,6 @@ export {
   revokeConsent,
   sendChatMessage,
   setTokenProvider,
+  triggerSessionDebrief,
   uploadRecordingFile,
 };

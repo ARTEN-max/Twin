@@ -11,6 +11,8 @@ import { transcribe, getTranscriptionProvider } from '../lib/ai/index.js';
 import { diarizeAudio } from '../lib/ai/diarization.js';
 import { db } from '../lib/db.js';
 import { transcriptionQueue, debriefQueue } from './queues.js';
+import { maybeEnqueueSessionDebrief } from './session-debrief.queue.js';
+import { incrementAudioMinutes } from '../lib/subscription.js';
 import { getEnv } from '../lib/env.js';
 import {
   withTempSplitUrlToWav16kMonoChunks,
@@ -72,42 +74,75 @@ export function startTranscriptionWorker(): Worker<
         const { downloadUrl } = await getPresignedDownloadUrl(objectKey);
         await job.updateProgress(20);
 
-        // Step 3: Transcribe audio
-        // Default: pass URL to provider for performance.
-        // Optional: if ENABLE_FFMPEG_TRANSCODE=true and the input is webm/ogg (common MediaRecorder formats),
-        // download + transcode to WAV 16k mono server-side to avoid provider format issues.
+        // Step 3a: Cost-floor short-circuit. If the client (iOS SFSpeechRecognizer)
+        // already wrote a Transcript row during completeUpload, use it directly
+        // and skip the Whisper API call entirely. This is the structural cost
+        // reduction — every minute transcribed on-device is a minute we don't
+        // pay for. Empty/missing transcripts fall through to the cloud path.
+        const existingTranscript = await db.transcript.findUnique({
+          where: { recordingId },
+          select: { text: true },
+        });
+
         const env = getEnv();
         const providerName = getTranscriptionProvider().name;
         const normalizedMime = mimeType.split(';')[0]?.trim().toLowerCase();
-        const recordingMeta = await db.recording.findUnique({
-          where: { id: recordingId },
-          select: {
-            fileSize: true,
-          },
-        });
-        const shouldChunkTranscription =
-          providerName === 'openai' ||
-          normalizedMime === 'audio/webm' ||
-          normalizedMime === 'audio/ogg' ||
-          (recordingMeta?.fileSize ?? 0) >= LONG_RECORDING_FILE_SIZE_BYTES;
 
-        log('Transcribing audio');
-        const transcriptionResult = shouldChunkTranscription
-          ? await transcribeInChunks(downloadUrl, normalizedMime, log)
-          : env.ENABLE_FFMPEG_TRANSCODE &&
-              (normalizedMime === 'audio/webm' || normalizedMime === 'audio/ogg')
-            ? await withTempTranscodeToWav16kMono(
-                { url: downloadUrl, inputMimeType: normalizedMime },
-                async ({ buffer, mimeType: outMime }) =>
-                  transcribe(
-                    { type: 'buffer', data: buffer, mimeType: outMime },
-                    { punctuate: true, diarize: false }
-                  )
-              )
-            : await transcribe(
-                { type: 'url', url: downloadUrl, mimeType },
-                { punctuate: true, diarize: false }
-              );
+        let transcriptionResult: {
+          text: string;
+          segments?: Array<{
+            start: number;
+            end: number;
+            text: string;
+            speaker?: string;
+            confidence?: number;
+          }>;
+          language: string;
+          duration?: number;
+          metadata?: Record<string, unknown>;
+        };
+
+        if (existingTranscript?.text && existingTranscript.text.trim().length > 0) {
+          log('Using client-provided transcript — skipping Whisper');
+          transcriptionResult = {
+            text: existingTranscript.text,
+            segments: [],
+            language: 'en',
+            duration: 0, // duration not known from on-device path; diarization gate uses this
+            metadata: { provider: 'on-device' },
+          };
+        } else {
+          // Step 3b: Server-side transcription (cloud fallback).
+          const recordingMeta = await db.recording.findUnique({
+            where: { id: recordingId },
+            select: {
+              fileSize: true,
+            },
+          });
+          const shouldChunkTranscription =
+            providerName === 'openai' ||
+            normalizedMime === 'audio/webm' ||
+            normalizedMime === 'audio/ogg' ||
+            (recordingMeta?.fileSize ?? 0) >= LONG_RECORDING_FILE_SIZE_BYTES;
+
+          log('Transcribing audio via cloud provider');
+          transcriptionResult = shouldChunkTranscription
+            ? await transcribeInChunks(downloadUrl, normalizedMime, log)
+            : env.ENABLE_FFMPEG_TRANSCODE &&
+                (normalizedMime === 'audio/webm' || normalizedMime === 'audio/ogg')
+              ? await withTempTranscodeToWav16kMono(
+                  { url: downloadUrl, inputMimeType: normalizedMime },
+                  async ({ buffer, mimeType: outMime }) =>
+                    transcribe(
+                      { type: 'buffer', data: buffer, mimeType: outMime },
+                      { punctuate: true, diarize: false }
+                    )
+                )
+              : await transcribe(
+                  { type: 'url', url: downloadUrl, mimeType },
+                  { punctuate: true, diarize: false }
+                );
+        }
 
         log(
           `Transcription complete: ${transcriptionResult.text.length} chars, ${transcriptionResult.segments?.length ?? 0} segments`
@@ -227,20 +262,36 @@ export function startTranscriptionWorker(): Worker<
             where: { id: recordingId },
             data: { duration: Math.round(transcriptionResult.duration) },
           });
+
+          // Bill the user's monthly audio-minute budget. The chunk-upload
+          // pre-check rejects new chunks once the cap is hit, so this just
+          // records what was spent. Round up to be conservative against
+          // partial-minute drift.
+          await incrementAudioMinutes(userId, transcriptionResult.duration / 60);
         }
         await job.updateProgress(85);
 
         // Step 6: Mark transcription job as complete
         await updateJobStatus(jobId, 'complete');
 
-        // Step 7: Get recording details and enqueue debrief job
-        log('Enqueueing debrief job');
+        // Step 7: Get recording details
         const recording = await db.recording.findUnique({
           where: { id: recordingId },
         });
 
-        if (recording && debriefQueue) {
-          // Create debrief job in database
+        // Session chunks skip the per-chunk debrief — only the session-level
+        // debrief (which joins all chunk transcripts) matters. For an N-chunk
+        // session this avoids N wasted GPT-4o calls and lets the recording
+        // flip to `complete` immediately so the session-debrief trigger fires.
+        if (recording && recording.sessionId) {
+          log(`Session chunk — skipping per-chunk debrief (sessionId=${recording.sessionId})`);
+          await db.recording.update({
+            where: { id: recordingId },
+            data: { status: 'complete' },
+          });
+          await maybeEnqueueSessionDebrief(recording.sessionId, userId, log);
+        } else if (recording && debriefQueue) {
+          log('Enqueueing per-recording debrief job');
           const debriefDbJob = await db.job.create({
             data: {
               recordingId,
@@ -249,7 +300,6 @@ export function startTranscriptionWorker(): Worker<
             },
           });
 
-          // Enqueue debrief job
           const debriefJobData: DebriefJobData = {
             recordingId,
             jobId: debriefDbJob.id,

@@ -8,6 +8,7 @@ import TwinLogo from './components/TwinLogo';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ConsentProvider, useConsent } from './contexts/ConsentContext';
 import { SubscriptionProvider } from './contexts/SubscriptionContext';
+import { RecordingProvider } from './contexts/RecordingContext';
 
 // Auth screens
 import SignInScreen from './screens/SignInScreen';
@@ -28,6 +29,7 @@ import TermsOfServiceScreen from './screens/TermsOfServiceScreen';
 import PaywallScreen from './screens/PaywallScreen';
 
 import TabBar, { type Tab } from './components/TabBar';
+import RecordingPill from './components/RecordingPill';
 import type { RootStackParamList, AuthStackParamList } from './navigation/types';
 
 // ─── Auth Stack ──────────────────────────────────────────────
@@ -102,6 +104,7 @@ function AppStack() {
   };
 
   const showTabBar = currentScreen === 'Recordings' || currentScreen === 'Chat';
+  const showRecordingPill = currentScreen !== 'NewRecording';
 
   const renderScreen = () => {
     switch (currentScreen) {
@@ -146,7 +149,7 @@ function AppStack() {
               navigate('Recordings');
               setCurrentTab('Today');
             }}
-            onPaywall={() => showPaywall('recording_limit_reached')}
+            onPaywall={(reason) => showPaywall(reason)}
           />
         );
       case 'VoiceProfile':
@@ -226,6 +229,7 @@ function AppStack() {
   return (
     <>
       <View style={styles.content}>{renderScreen()}</View>
+      {showRecordingPill && <RecordingPill onTap={() => navigate('NewRecording')} />}
       {showTabBar && <TabBar activeTab={currentTab} onTabChange={handleTabChange} />}
     </>
   );
@@ -286,7 +290,11 @@ function ConsentGate() {
       />
     );
   }
-  return <AppStack />;
+  return (
+    <RecordingProvider>
+      <AppStack />
+    </RecordingProvider>
+  );
 }
 
 export default function App() {

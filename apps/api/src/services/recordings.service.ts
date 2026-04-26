@@ -188,21 +188,76 @@ export async function getRecordingByUser(
       errorMessage = failedJob?.error || null;
     }
 
+    // Session enrichment: when this recording is part of a session, the
+    // per-chunk debrief is intentionally skipped (the session-level debrief
+    // covers the whole conversation). Surface the session's debrief and
+    // combined transcript on every chunk's detail response so the mobile
+    // detail screen renders session content regardless of which chunk it's
+    // pointed at.
+    let mergedTranscript: RecordingWithRelations['transcript'] = recording.transcript
+      ? {
+          id: recording.transcript.id,
+          text: recording.transcript.text,
+          segments: recording.transcript.segments as TranscriptSegment[] | null,
+          language: recording.transcript.language,
+          createdAt: recording.transcript.createdAt,
+        }
+      : null;
+    let mergedDebrief: RecordingWithRelations['debrief'] = recording.debrief
+      ? {
+          id: recording.debrief.id,
+          markdown: recording.debrief.markdown,
+          sections: recording.debrief.sections as DebriefSection[],
+          createdAt: recording.debrief.createdAt,
+        }
+      : null;
+
+    if (recording.sessionId) {
+      const session = await db.session.findUnique({
+        where: { id: recording.sessionId },
+        select: {
+          debriefMarkdown: true,
+          debriefSections: true,
+          recordings: {
+            select: { id: true, chunkIndex: true, transcript: { select: { text: true } } },
+            orderBy: { chunkIndex: 'asc' },
+          },
+        },
+      });
+
+      if (session?.debriefMarkdown) {
+        mergedDebrief = {
+          id: recording.id,
+          markdown: session.debriefMarkdown,
+          sections: (session.debriefSections ?? []) as DebriefSection[],
+          createdAt: recording.createdAt,
+        };
+      }
+
+      if (session?.recordings.length) {
+        const combinedText = session.recordings
+          .map((r) => r.transcript?.text)
+          .filter((t): t is string => !!t)
+          .join('\n\n');
+        if (combinedText.length > 0) {
+          mergedTranscript = mergedTranscript
+            ? { ...mergedTranscript, text: combinedText }
+            : {
+                id: recording.id,
+                text: combinedText,
+                segments: null,
+                language: 'en',
+                createdAt: recording.createdAt,
+              };
+        }
+      }
+    }
+
     return {
       ...recording,
       errorMessage,
-      transcript: recording.transcript
-        ? {
-            ...recording.transcript,
-            segments: recording.transcript.segments as TranscriptSegment[] | null,
-          }
-        : null,
-      debrief: recording.debrief
-        ? {
-            ...recording.debrief,
-            sections: recording.debrief.sections as DebriefSection[],
-          }
-        : null,
+      transcript: mergedTranscript,
+      debrief: mergedDebrief,
     } as RecordingWithRelations;
   }
 
@@ -244,8 +299,14 @@ export async function listRecordingsByUser(
   const { page = 1, limit = 20, status, date, cursor } = options;
   const skip = (page - 1) * limit;
 
+  // Hide session continuation chunks (chunkIndex > 1) from the list — only the
+  // first chunk acts as the session entry. A 4-hour session produces ~240
+  // chunk rows in the DB; without this filter, the user's recordings list
+  // becomes unusable. The detail-fetch enrichment renders the session's
+  // combined debrief on whichever chunk the user opens.
   const where: Prisma.RecordingWhereInput = {
     userId,
+    OR: [{ chunkIndex: null }, { chunkIndex: 1 }],
     ...(status && { status }),
     ...(date &&
       (() => {

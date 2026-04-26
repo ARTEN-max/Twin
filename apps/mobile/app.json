@@ -18,6 +18,7 @@
       "buildNumber": "1",
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Twin needs access to your microphone to record audio for transcription and debrief generation.",
+        "NSSpeechRecognitionUsageDescription": "Twin uses on-device speech recognition to transcribe your recordings privately, without sending audio to external servers.",
         "UIBackgroundModes": ["audio"],
         "ITSAppUsesNonExemptEncryption": false
       }

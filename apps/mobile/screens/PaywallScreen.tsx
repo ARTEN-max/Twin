@@ -33,6 +33,7 @@ const FEATURES = [
 
 const REASON_MESSAGES: Record<string, string> = {
   recording_limit_reached: "You've used all 5 free recordings this month.",
+  audio_minutes_limit_reached: "You've used all 120 free recording minutes this month.",
   chat_limit_reached: "You've used all 20 free chat messages today.",
   voice_reenroll: 'Re-enrolling your voice requires Twin Pro.',
 };

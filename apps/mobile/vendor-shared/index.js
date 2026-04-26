@@ -183,7 +183,28 @@ async function createRecording(userId, params) {
       title: params.title,
       mode: params.mode || 'general',
       mimeType: params.mimeType,
+      ...(params.sessionId != null && { sessionId: params.sessionId }),
+      ...(params.chunkIndex != null && { chunkIndex: params.chunkIndex }),
     }),
+  });
+}
+async function createSession(userId, title) {
+  return apiRequest('/api/sessions', {
+    method: 'POST',
+    headers: { 'x-user-id': userId },
+    body: JSON.stringify(title ? { title } : {}),
+  });
+}
+async function getSession(userId, sessionId) {
+  return apiRequest(`/api/sessions/${sessionId}`, {
+    headers: { 'x-user-id': userId },
+  });
+}
+async function triggerSessionDebrief(userId, sessionId) {
+  return apiRequest(`/api/sessions/${sessionId}/debrief`, {
+    method: 'POST',
+    headers: { 'x-user-id': userId },
+    body: JSON.stringify({}),
   });
 }
 async function uploadRecordingFile(userId, recordingId, fileData, contentType) {
@@ -676,6 +697,7 @@ export {
   createJobSchema,
   createRecording,
   createRecordingSchema,
+  createSession,
   createTranscriptSchema,
   createUserSchema,
   debriefSchema,
@@ -689,6 +711,7 @@ export {
   getRecording,
   getRecordingResult,
   getRecordingStatus,
+  getSession,
   getVoiceProfileStatus,
   jobSchema,
   listRecordings,
@@ -708,6 +731,7 @@ export {
   transcriptSchema,
   transcriptSegmentDetailSchema,
   transcriptSegmentSchema,
+  triggerSessionDebrief,
   updateRecordingSchema,
   uploadRecordingFile,
   userSchema,

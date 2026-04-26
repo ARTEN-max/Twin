@@ -26,7 +26,7 @@ import {
 import { enqueueTranscriptionJob, type TranscriptionJobData } from '../queues/index.js';
 import { uploadRateLimit } from '../plugins/rate-limit.js';
 import { db } from '../lib/db.js';
-import { checkAndIncrementRecordingCount } from '../lib/subscription.js';
+import { checkAndIncrementRecordingCount, checkAudioMinutesAllowed } from '../lib/subscription.js';
 
 // ============================================
 // Request Schemas
@@ -109,6 +109,13 @@ const listRecordingsQuerySchema = z.object({
 
 const completeUploadBodySchema = z.object({
   fileSize: z.number().int().positive().optional(), // Actual file size after upload
+  /**
+   * Optional client-side transcript (e.g. from iOS SFSpeechRecognizer). When
+   * present, the server skips the Whisper API call and uses this directly,
+   * eliminating the per-minute transcription cost. Empty/missing values fall
+   * through to cloud transcription as before.
+   */
+  transcript: z.string().min(1).max(200_000).optional(),
 });
 
 // ============================================
@@ -132,20 +139,7 @@ export const recordingsRoutes: FastifyPluginAsync = async (app) => {
     // Consent gate — must accept before creating recordings
     await requireConsent(userId);
 
-    // Subscription limit check
-    await ensureUserExists(userId, email);
-    const limitCheck = await checkAndIncrementRecordingCount(userId);
-    if (!limitCheck.allowed) {
-      return reply.status(402).send({
-        error: 'recording_limit_reached',
-        message: `You've used all ${limitCheck.limit} recordings for this month. Upgrade to Twin Pro for unlimited recordings.`,
-        used: limitCheck.used,
-        limit: limitCheck.limit,
-        tier: limitCheck.tier,
-      });
-    }
-
-    // Validate request body
+    // Validate request body first so we know whether this is a session continuation
     const parseResult = createRecordingSchema.safeParse(request.body);
     if (!parseResult.success) {
       return reply.status(400).send({
@@ -157,6 +151,43 @@ export const recordingsRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const { title, mode, mimeType: rawMimeType, sessionId, chunkIndex } = parseResult.data;
+
+    // Continuation chunks of an existing session don't count against the
+    // session quota — only the first chunk (or a standalone recording)
+    // increments the session counter.
+    const isSessionContinuation = sessionId != null && (chunkIndex ?? 1) > 1;
+
+    await ensureUserExists(userId, email);
+
+    // Audio-minute cap: the cost-bound check, applied to every chunk. The
+    // increment happens in the transcription worker (after we know real
+    // duration), but we reject NEW chunks the moment the user is over budget
+    // so we don't spend Whisper minutes we'll never collect on.
+    const audioCheck = await checkAudioMinutesAllowed(userId);
+    if (!audioCheck.allowed) {
+      return reply.status(402).send({
+        error: 'audio_minutes_limit_reached',
+        message: audioCheck.limit
+          ? `You've used your ${audioCheck.limit} minutes of recording this month. Upgrade for more.`
+          : 'Audio minute limit reached.',
+        used: audioCheck.used,
+        limit: audioCheck.limit,
+        tier: audioCheck.tier,
+      });
+    }
+
+    if (!isSessionContinuation) {
+      const limitCheck = await checkAndIncrementRecordingCount(userId);
+      if (!limitCheck.allowed) {
+        return reply.status(402).send({
+          error: 'recording_limit_reached',
+          message: `You've used all ${limitCheck.limit} recordings for this month. Upgrade to Twin Pro for unlimited recordings.`,
+          used: limitCheck.used,
+          limit: limitCheck.limit,
+          tier: limitCheck.tier,
+        });
+      }
+    }
     const mimeType = normalizeMimeType(rawMimeType);
 
     // Validate MIME type
@@ -176,9 +207,6 @@ export const recordingsRoutes: FastifyPluginAsync = async (app) => {
     const filename = `${safeTitle || 'recording'}.${ext}`;
 
     try {
-      // 0. Ensure user exists in the database
-      await ensureUserExists(userId, email);
-
       // 1. Create recording in pending status
       const recording = await createRecording({
         userId,
@@ -281,8 +309,20 @@ export const recordingsRoutes: FastifyPluginAsync = async (app) => {
       }
 
       // 4. Mark as uploaded
-      const { fileSize } = parseResult.data;
+      const { fileSize, transcript } = parseResult.data;
       await completeUpload(id, fileSize);
+
+      // 4b. If the client transcribed on-device (iOS SFSpeechRecognizer), save
+      // the transcript now. The transcription worker will see an existing
+      // Transcript row and skip the Whisper API call entirely — that's where
+      // the per-minute cost actually disappears.
+      if (transcript && transcript.trim().length > 0) {
+        await db.transcript.upsert({
+          where: { recordingId: id },
+          create: { recordingId: id, text: transcript },
+          update: { text: transcript },
+        });
+      }
 
       // 5. Create transcription job in database
       const dbJob = await createJob({

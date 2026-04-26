@@ -75,6 +75,11 @@ model User {
   recordingsMonthResetAt DateTime? @map("recordings_month_reset_at")
   chatMessagesToday      Int       @default(0) @map("chat_messages_today")
   chatMessagesDayResetAt DateTime? @map("chat_messages_day_reset_at")
+  // Audio-minute cap is the cost-bound counter — every chunk's transcribed
+  // duration adds to this. Tier limits enforce a monthly ceiling so a single
+  // power user can't run up unbounded Whisper minutes.
+  audioMinutesThisMonth      Int       @default(0) @map("audio_minutes_this_month")
+  audioMinutesMonthResetAt   DateTime? @map("audio_minutes_month_reset_at")
 
   createdAt         DateTime      @default(now()) @map("created_at")
   updatedAt         DateTime      @updatedAt @map("updated_at")
@@ -130,6 +135,12 @@ model Session {
   status          SessionStatus @default(pending)
   debriefMarkdown String?       @map("debrief_markdown")
   debriefSections Json?         @map("debrief_sections") @default("[]")
+
+  // Set when the client signals "I'm done recording" — the worker uses this as
+  // the trigger to fire the session debrief once all chunks finish processing.
+  // Without this, a chunk-1-finishes-before-chunk-2-uploads race could fire the
+  // debrief prematurely with partial data.
+  debriefRequestedAt DateTime? @map("debrief_requested_at")
 
   user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   recordings  Recording[]

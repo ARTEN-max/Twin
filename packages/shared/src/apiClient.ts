@@ -338,6 +338,12 @@ export async function triggerSessionDebrief(
 
 export interface CompleteUploadParams {
   fileSize?: number;
+  /**
+   * Optional client-side transcript (from iOS SFSpeechRecognizer or similar).
+   * When provided, the server skips its cloud transcription provider and uses
+   * this directly — eliminating per-minute Whisper cost.
+   */
+  transcript?: string;
 }
 
 export interface CompleteUploadResponse {
@@ -1062,12 +1068,14 @@ export interface MeResponse {
     expiresAt: string | null;
     limits: {
       recordingsPerMonth: number | null;
-      maxRecordingMinutes: number | null;
+      maxMinutesPerRecording: number | null;
+      maxAudioMinutesPerMonth: number | null;
       chatMessagesPerDay: number | null;
       historyLimit: number | null;
     };
     usage: {
       recordingsThisMonth: number;
+      audioMinutesThisMonth: number;
       chatMessagesToday: number;
     };
   };
