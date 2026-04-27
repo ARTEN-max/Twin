@@ -14,6 +14,32 @@ import type {
   PaginatedResponse,
 } from './types/index.js';
 
+function shouldLogDebug(): boolean {
+  const maybeDev = (globalThis as { __DEV__?: boolean }).__DEV__;
+  if (typeof maybeDev === 'boolean') {
+    return maybeDev;
+  }
+  return typeof process !== 'undefined' ? process.env?.NODE_ENV !== 'production' : false;
+}
+
+function logDebug(message: string, payload?: unknown): void {
+  if (!shouldLogDebug() || typeof console === 'undefined' || !console.log) return;
+  if (payload === undefined) {
+    console.log(message);
+  } else {
+    console.log(message, payload);
+  }
+}
+
+function warnDebug(message: string, payload?: unknown): void {
+  if (!shouldLogDebug() || typeof console === 'undefined' || !console.warn) return;
+  if (payload === undefined) {
+    console.warn(message);
+  } else {
+    console.warn(message, payload);
+  }
+}
+
 // ============================================
 // Configuration
 // ============================================
@@ -25,16 +51,12 @@ const getBaseUrl = (): string => {
   if (typeof process !== 'undefined') {
     if (process.env?.EXPO_PUBLIC_API_BASE_URL) {
       const url = process.env.EXPO_PUBLIC_API_BASE_URL;
-      if (typeof console !== 'undefined' && console.log) {
-        console.log('[API Client] Using API URL from process.env:', url);
-      }
+      logDebug('[API Client] Using API URL from process.env:', url);
       return url;
     }
     if (process.env?.NEXT_PUBLIC_API_URL) {
       const url = process.env.NEXT_PUBLIC_API_URL;
-      if (typeof console !== 'undefined' && console.log) {
-        console.log('[API Client] Using API URL from NEXT_PUBLIC_API_URL:', url);
-      }
+      logDebug('[API Client] Using API URL from NEXT_PUBLIC_API_URL:', url);
       return url;
     }
   }
@@ -45,21 +67,14 @@ const getBaseUrl = (): string => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const win = (globalThis as any).window;
     if (win?.__API_BASE_URL__) {
-      if (typeof console !== 'undefined' && console.log) {
-        console.log(
-          '[API Client] Using API URL from window.__API_BASE_URL__:',
-          win.__API_BASE_URL__
-        );
-      }
+      logDebug('[API Client] Using API URL from window.__API_BASE_URL__:', win.__API_BASE_URL__);
       return win.__API_BASE_URL__;
     }
   }
 
   // Default fallback - use Railway URL for production
   const fallbackUrl = 'https://twin-production-a0e4.up.railway.app';
-  if (typeof console !== 'undefined' && console.warn) {
-    console.warn('[API Client] No API URL found in env, using fallback:', fallbackUrl);
-  }
+  warnDebug('[API Client] No API URL found in env, using fallback:', fallbackUrl);
   return fallbackUrl;
 };
 
@@ -74,6 +89,21 @@ const getBaseUrl = (): string => {
 type TokenProvider = () => Promise<string | null>;
 
 let _tokenProvider: TokenProvider | null = null;
+
+function shouldSendLegacyUserIdHeader(): boolean {
+  const maybeDev = (globalThis as { __DEV__?: boolean }).__DEV__;
+  if (typeof maybeDev === 'boolean') {
+    return maybeDev;
+  }
+  return typeof process !== 'undefined' ? process.env?.NODE_ENV !== 'production' : false;
+}
+
+function buildUserHeaders(
+  userId: string,
+  extraHeaders: Record<string, string> = {}
+): Record<string, string> {
+  return shouldSendLegacyUserIdHeader() ? { ...extraHeaders, 'x-user-id': userId } : extraHeaders;
+}
 
 /**
  * Configure a token provider for automatic Authorization header injection.
@@ -174,9 +204,7 @@ async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promi
   const url = endpoint.startsWith('http') ? endpoint : `${baseUrl}${endpoint}`;
 
   // Debug logging in development
-  if (typeof console !== 'undefined' && console.log) {
-    console.log('[API Client] Request:', { method: options.method || 'GET', url, baseUrl });
-  }
+  logDebug('[API Client] Request:', { method: options.method || 'GET', url, baseUrl });
 
   // Only set Content-Type for requests that have a body
   const hasBody = options.body !== undefined && options.body !== null;
@@ -257,9 +285,7 @@ export async function createRecording(
 ): Promise<CreateRecordingResponse> {
   return apiRequest<CreateRecordingResponse>('/api/recordings', {
     method: 'POST',
-    headers: {
-      'x-user-id': userId,
-    },
+    headers: buildUserHeaders(userId),
     body: JSON.stringify({
       title: params.title,
       mode: params.mode || 'general',
@@ -307,7 +333,7 @@ export async function createSession(
 ): Promise<CreateSessionResponse> {
   return apiRequest<CreateSessionResponse>('/api/sessions', {
     method: 'POST',
-    headers: { 'x-user-id': userId },
+    headers: buildUserHeaders(userId),
     body: JSON.stringify(title ? { title } : {}),
   });
 }
@@ -317,7 +343,7 @@ export async function createSession(
  */
 export async function getSession(userId: string, sessionId: string): Promise<SessionResponse> {
   return apiRequest<SessionResponse>(`/api/sessions/${sessionId}`, {
-    headers: { 'x-user-id': userId },
+    headers: buildUserHeaders(userId),
   });
 }
 
@@ -331,7 +357,7 @@ export async function triggerSessionDebrief(
 ): Promise<TriggerSessionDebriefResponse> {
   return apiRequest<TriggerSessionDebriefResponse>(`/api/sessions/${sessionId}/debrief`, {
     method: 'POST',
-    headers: { 'x-user-id': userId },
+    headers: buildUserHeaders(userId),
     body: JSON.stringify({}),
   });
 }
@@ -366,7 +392,7 @@ export async function uploadRecordingFile(
   const baseUrl = getBaseUrl();
   const url = `${baseUrl}/api/recordings/${recordingId}/upload`;
 
-  console.log('[API Client] Upload request:', {
+  logDebug('[API Client] Upload request:', {
     baseUrl,
     url,
     recordingId,
@@ -375,30 +401,29 @@ export async function uploadRecordingFile(
   });
 
   // Build headers – include auth token if available
-  const uploadHeaders: Record<string, string> = {
-    'x-user-id': userId,
+  const uploadHeaders: Record<string, string> = buildUserHeaders(userId, {
     'Content-Type': contentType,
-  };
+  });
   if (_tokenProvider) {
     try {
       const token = await _tokenProvider();
       if (token) {
         uploadHeaders['Authorization'] = `Bearer ${token}`;
-        console.log('[API Client] Auth token included in upload headers');
+        logDebug('[API Client] Auth token included in upload headers');
       } else {
-        console.warn('[API Client] No auth token available for upload');
+        warnDebug('[API Client] No auth token available for upload');
       }
     } catch (error) {
-      console.warn('[API Client] Failed to get auth token:', error);
+      warnDebug('[API Client] Failed to get auth token:', error);
     }
   } else {
-    console.warn('[API Client] No token provider set for upload');
+    warnDebug('[API Client] No token provider set for upload');
   }
 
-  console.log('[API Client] Upload headers:', {
-    'x-user-id': userId.substring(0, 8) + '...',
+  logDebug('[API Client] Upload headers:', {
     'Content-Type': contentType,
     'has-auth': !!uploadHeaders['Authorization'],
+    'has-legacy-user-id': !!uploadHeaders['x-user-id'],
   });
 
   try {
@@ -409,7 +434,7 @@ export async function uploadRecordingFile(
     // Don't convert to Blob as it may not be available in all React Native environments
     const body = fileData instanceof Uint8Array ? fileData : new Uint8Array(fileData);
 
-    console.log('[API Client] Starting upload fetch:', {
+    logDebug('[API Client] Starting upload fetch:', {
       url,
       contentType,
       bodyType: body instanceof Uint8Array ? 'Uint8Array' : typeof body,
@@ -426,7 +451,7 @@ export async function uploadRecordingFile(
         body: body,
         signal: controller.signal,
       });
-      console.log('[API Client] Upload fetch completed:', {
+      logDebug('[API Client] Upload fetch completed:', {
         status: response.status,
         statusText: response.statusText,
         ok: response.ok,
@@ -493,10 +518,11 @@ export async function completeUpload(
   return apiRequest<CompleteUploadResponse>(`/api/recordings/${recordingId}/complete-upload`, {
     method: 'POST',
     headers: {
-      'x-user-id': userId,
+      ...buildUserHeaders(userId),
     },
     body: JSON.stringify({
       fileSize: params?.fileSize,
+      ...(params?.transcript ? { transcript: params.transcript } : {}),
     }),
   });
 }
@@ -520,9 +546,7 @@ export async function getRecordingStatus(
 ): Promise<RecordingStatusResponse> {
   return apiRequest<RecordingStatusResponse>(`/api/recordings/${recordingId}`, {
     method: 'GET',
-    headers: {
-      'x-user-id': userId,
-    },
+    headers: buildUserHeaders(userId),
   });
 }
 
@@ -555,9 +579,7 @@ export async function getRecordingResult(
 ): Promise<RecordingResultResponse> {
   return apiRequest<RecordingResultResponse>(`/api/recordings/${recordingId}?include=all`, {
     method: 'GET',
-    headers: {
-      'x-user-id': userId,
-    },
+    headers: buildUserHeaders(userId),
   });
 }
 
@@ -585,9 +607,7 @@ export async function listRecordingsByDay(
 
   return apiRequest<PaginatedResponse<Recording>>(endpoint, {
     method: 'GET',
-    headers: {
-      'x-user-id': userId,
-    },
+    headers: buildUserHeaders(userId),
   });
 }
 
@@ -628,9 +648,7 @@ export async function listRecordings(
     try {
       return await apiRequest<PaginatedResponse<Recording>>(endpoint, {
         method: 'GET',
-        headers: {
-          'x-user-id': userId,
-        },
+        headers: buildUserHeaders(userId),
       });
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
@@ -672,9 +690,7 @@ export async function getRecording(
     try {
       return await apiRequest<RecordingResultResponse>(endpoint, {
         method: 'GET',
-        headers: {
-          'x-user-id': userId,
-        },
+        headers: buildUserHeaders(userId),
       });
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
@@ -707,9 +723,7 @@ export async function retryTranscription(
     `/api/recordings/${recordingId}/retry-transcription`,
     {
       method: 'POST',
-      headers: {
-        'x-user-id': userId,
-      },
+      headers: buildUserHeaders(userId),
     }
   );
 }
@@ -738,9 +752,7 @@ export interface ChatSession {
 export async function getChatSession(userId: string, date: string): Promise<ChatSession> {
   return apiRequest<ChatSession>(`/api/chat/session?date=${date}`, {
     method: 'GET',
-    headers: {
-      'x-user-id': userId,
-    },
+    headers: buildUserHeaders(userId),
   });
 }
 
@@ -774,11 +786,10 @@ export async function sendChatMessage(
   const url = `${baseUrl}/api/chat`;
 
   // Build headers – include auth token if available
-  const chatHeaders: Record<string, string> = {
-    'x-user-id': userId,
+  const chatHeaders: Record<string, string> = buildUserHeaders(userId, {
     'Content-Type': 'application/json',
     Accept: 'application/json', // Request JSON instead of streaming
-  };
+  });
   if (_tokenProvider) {
     try {
       const token = await _tokenProvider();
@@ -980,9 +991,7 @@ export interface VoiceProfileStatusResponse {
 export async function getVoiceProfileStatus(userId: string): Promise<VoiceProfileStatusResponse> {
   return apiRequest<VoiceProfileStatusResponse>('/api/voice-profile/status', {
     method: 'GET',
-    headers: {
-      'x-user-id': userId,
-    },
+    headers: buildUserHeaders(userId),
   });
 }
 
@@ -1002,9 +1011,7 @@ export async function enrollVoiceProfile(
   formData.append('audio', file);
 
   // Build headers – include auth token if available
-  const enrollHeaders: Record<string, string> = {
-    'x-user-id': userId,
-  };
+  const enrollHeaders: Record<string, string> = buildUserHeaders(userId);
   if (_tokenProvider) {
     try {
       const token = await _tokenProvider();
@@ -1048,9 +1055,7 @@ export async function deleteVoiceProfile(
 ): Promise<{ success: boolean; message: string }> {
   return apiRequest<{ success: boolean; message: string }>('/api/voice-profile', {
     method: 'DELETE',
-    headers: {
-      'x-user-id': userId,
-    },
+    headers: buildUserHeaders(userId),
   });
 }
 
@@ -1087,7 +1092,7 @@ export interface MeResponse {
 export async function getMe(userId: string): Promise<MeResponse> {
   return apiRequest<MeResponse>('/api/me', {
     method: 'GET',
-    headers: { 'x-user-id': userId },
+    headers: buildUserHeaders(userId),
   });
 }
 
@@ -1097,7 +1102,7 @@ export async function getMe(userId: string): Promise<MeResponse> {
 export async function acceptConsent(userId: string): Promise<MeResponse> {
   return apiRequest<MeResponse>('/api/me/consent/accept', {
     method: 'POST',
-    headers: { 'x-user-id': userId },
+    headers: buildUserHeaders(userId),
   });
 }
 
@@ -1107,7 +1112,7 @@ export async function acceptConsent(userId: string): Promise<MeResponse> {
 export async function revokeConsent(userId: string): Promise<MeResponse> {
   return apiRequest<MeResponse>('/api/me/consent/revoke', {
     method: 'POST',
-    headers: { 'x-user-id': userId },
+    headers: buildUserHeaders(userId),
   });
 }
 
@@ -1117,7 +1122,7 @@ export async function revokeConsent(userId: string): Promise<MeResponse> {
 export async function deleteAccountApi(userId: string): Promise<{ ok: boolean }> {
   return apiRequest<{ ok: boolean }>('/api/me', {
     method: 'DELETE',
-    headers: { 'x-user-id': userId },
+    headers: buildUserHeaders(userId),
   });
 }
 
@@ -1130,7 +1135,7 @@ export async function deleteRecordingApi(
 ): Promise<{ ok: boolean }> {
   return apiRequest<{ ok: boolean }>(`/api/recordings/${recordingId}`, {
     method: 'DELETE',
-    headers: { 'x-user-id': userId },
+    headers: buildUserHeaders(userId),
   });
 }
 

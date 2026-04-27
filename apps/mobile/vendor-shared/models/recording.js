@@ -4,7 +4,7 @@ import {
   toRecordingDetail,
   toRecordingSummary,
   transcriptSegmentDetailSchema,
-} from '../chunk-6ADLA7ZV.js';
+} from '../chunk-32TTR6YF.js';
 import '../chunk-EW7TT2XP.js';
 export {
   recordingDetailSchema,

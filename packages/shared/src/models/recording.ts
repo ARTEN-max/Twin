@@ -1,6 +1,6 @@
 /**
  * Recording Data Models
- * 
+ *
  * Domain models for recording summaries and details used in the mobile app.
  */
 
@@ -42,11 +42,13 @@ export type TranscriptSegmentDetail = z.infer<typeof transcriptSegmentDetailSche
 // ============================================
 
 export const recordingDetailSchema = recordingSummarySchema.extend({
-  transcript: z.object({
-    text: z.string(),
-    segments: z.array(transcriptSegmentDetailSchema),
-    language: z.string().optional(),
-  }).nullable(),
+  transcript: z
+    .object({
+      text: z.string(),
+      segments: z.array(transcriptSegmentDetailSchema),
+      language: z.string().optional(),
+    })
+    .nullable(),
   debriefMarkdown: z.string().nullable(),
   speakers: z.array(z.string()).optional(), // List of unique speaker IDs
 });
@@ -63,7 +65,7 @@ export type RecordingDetail = z.infer<typeof recordingDetailSchema>;
 export function toRecordingSummary(recording: {
   id: string;
   createdAt: string | Date;
-  duration: number | null;
+  duration?: number | null;
   status: string;
   title: string | null;
   debrief?: { id: string } | null;
@@ -71,10 +73,11 @@ export function toRecordingSummary(recording: {
 }): RecordingSummary {
   return {
     id: recording.id,
-    createdAt: typeof recording.createdAt === 'string' 
-      ? recording.createdAt 
-      : recording.createdAt.toISOString(),
-    durationSec: recording.duration,
+    createdAt:
+      typeof recording.createdAt === 'string'
+        ? recording.createdAt
+        : recording.createdAt.toISOString(),
+    durationSec: recording.duration ?? null,
     status: recording.status as RecordingSummary['status'],
     title: recording.title || undefined,
     hasDebrief: !!recording.debrief,
@@ -93,7 +96,7 @@ export function toRecordingSummary(recording: {
 export function toRecordingDetail(recording: {
   id: string;
   createdAt: string | Date;
-  duration: number | null;
+  duration?: number | null;
   status: string;
   title: string | null;
   transcript?: {
@@ -115,16 +118,17 @@ export function toRecordingDetail(recording: {
   // Create summary with proper structure
   const summary: RecordingSummary = {
     id: recording.id,
-    createdAt: typeof recording.createdAt === 'string' 
-      ? recording.createdAt 
-      : recording.createdAt.toISOString(),
-    durationSec: recording.duration,
+    createdAt:
+      typeof recording.createdAt === 'string'
+        ? recording.createdAt
+        : recording.createdAt.toISOString(),
+    durationSec: recording.duration ?? null,
     status: recording.status as RecordingSummary['status'],
     title: recording.title || undefined,
     hasDebrief: !!recording.debrief,
     hasTranscript: !!recording.transcript,
   };
-  
+
   // Convert transcript segments from seconds to milliseconds
   const segments: TranscriptSegmentDetail[] = recording.transcript?.segments
     ? recording.transcript.segments.map((seg) => ({
@@ -136,9 +140,7 @@ export function toRecordingDetail(recording: {
     : [];
 
   // Extract unique speakers
-  const speakers = Array.from(
-    new Set(segments.map((s) => s.speaker))
-  );
+  const speakers = Array.from(new Set(segments.map((s) => s.speaker)));
 
   return {
     ...summary,

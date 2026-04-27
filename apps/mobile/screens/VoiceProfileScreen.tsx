@@ -107,28 +107,22 @@ export default function VoiceProfileScreen({ onBack, onPaywall }: VoiceProfileSc
 
   // Cleanup timeout when state changes away from recording
   useEffect(() => {
-    console.log('State changed to:', state);
     if (state !== 'recording') {
-      console.log('State is not recording, clearing timeout');
       isRecordingRef.current = false;
       if (durationTimeoutRef.current) {
-        console.log('Clearing duration timeout, final duration:', durationRef.current);
         clearTimeout(durationTimeoutRef.current);
         durationTimeoutRef.current = null;
       }
     } else {
       // When state becomes 'recording', ensure ref is true and timeout is running
-      console.log('State is recording, ensuring ref is true');
       isRecordingRef.current = true;
       // Don't start timeout here - it should already be started in startRecording
       // But verify it exists
       if (!durationTimeoutRef.current) {
-        console.warn('⚠️ State is recording but timeout is null! Starting timeout...');
         const scheduleNextTick = () => {
           if (isRecordingRef.current) {
             durationRef.current += 1;
             const newDuration = durationRef.current;
-            console.log('⏱️ Recording duration:', newDuration, 'seconds');
             setDuration(newDuration);
             durationTimeoutRef.current = setTimeout(scheduleNextTick, 1000);
           } else {
@@ -209,7 +203,6 @@ export default function VoiceProfileScreen({ onBack, onPaywall }: VoiceProfileSc
   };
 
   const startRecording = async () => {
-    console.log('startRecording called');
     try {
       setState('requesting-permission');
       setError(null);
@@ -217,15 +210,12 @@ export default function VoiceProfileScreen({ onBack, onPaywall }: VoiceProfileSc
       setDuration(0);
       setAudioUri(null);
 
-      console.log('Requesting microphone permission...');
       const hasPermission = await requestPermission();
       if (!hasPermission) {
-        console.log('Permission denied');
         setState('idle');
         return;
       }
 
-      console.log('Permission granted, configuring audio mode...');
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
@@ -235,13 +225,10 @@ export default function VoiceProfileScreen({ onBack, onPaywall }: VoiceProfileSc
         shouldDuckAndroid: false,
       });
 
-      console.log('Creating recording...');
       // Create and start recording
       const { recording: newRecording } = await Audio.Recording.createAsync(
         Audio.RecordingOptionsPresets.HIGH_QUALITY
       );
-
-      console.log('Recording started successfully');
 
       // Clear any existing timeout first
       if (durationTimeoutRef.current) {
@@ -259,20 +246,17 @@ export default function VoiceProfileScreen({ onBack, onPaywall }: VoiceProfileSc
         if (isRecordingRef.current) {
           durationRef.current += 1;
           const newDuration = durationRef.current;
-          console.log('⏱️ Timer tick - Setting duration to:', newDuration);
           setDuration(newDuration);
 
           // Schedule next tick
           durationTimeoutRef.current = setTimeout(scheduleNextTick, 1000);
         } else {
-          console.log('⏱️ Timer stopped - isRecordingRef is false');
           durationTimeoutRef.current = null;
         }
       };
 
       // Start the first tick immediately
       durationTimeoutRef.current = setTimeout(scheduleNextTick, 1000);
-      console.log('✅ Duration timer started using recursive setTimeout');
 
       // Now set state - useEffect will see timeout already exists
       setState('recording');
@@ -288,7 +272,6 @@ export default function VoiceProfileScreen({ onBack, onPaywall }: VoiceProfileSc
   };
 
   const handleStop = async () => {
-    console.log('handleStop called', { recording: !!recording, duration });
     if (!recording) return;
 
     try {
@@ -299,14 +282,11 @@ export default function VoiceProfileScreen({ onBack, onPaywall }: VoiceProfileSc
         durationTimeoutRef.current = null;
       }
 
-      console.log('Stopping recording...');
       // Get URI before stopping (it's available while recording)
       const uri = recording.getURI();
 
       // Stop and unload the recording
       await recording.stopAndUnloadAsync();
-
-      console.log('Recording stopped, URI:', uri);
 
       if (!uri) {
         throw new Error('No recording URI returned');
@@ -314,7 +294,6 @@ export default function VoiceProfileScreen({ onBack, onPaywall }: VoiceProfileSc
 
       // Preserve duration from ref (more reliable than state)
       const finalDuration = durationRef.current;
-      console.log('Recording saved, final duration:', finalDuration, 'seconds');
 
       setAudioUri(uri);
       setRecording(null);
@@ -350,18 +329,15 @@ export default function VoiceProfileScreen({ onBack, onPaywall }: VoiceProfileSc
         try {
           await recording.stopAndUnloadAsync();
         } catch {
-          // Recording might already be stopped/unloaded, try just unloading
-          try {
-            await recording.unloadAsync();
-          } catch {
-            // Ignore - recording is already unloaded
-          }
+          // Ignore - recording may already be stopped/unloaded.
         }
         setRecording(null);
       }
     } catch (err) {
       // Ignore errors if recording is already unloaded
-      console.log('Recording reset error (ignored):', err);
+      if (__DEV__) {
+        console.log('Recording reset error (ignored):', err);
+      }
     } finally {
       setAudioUri(null);
       durationRef.current = 0;
@@ -372,15 +348,7 @@ export default function VoiceProfileScreen({ onBack, onPaywall }: VoiceProfileSc
   };
 
   const handleEnroll = async () => {
-    console.log('🚀 handleEnroll called', {
-      audioUri,
-      duration,
-      state,
-      durationRef: durationRef.current,
-    });
-
     if (!audioUri) {
-      console.error('❌ No audioUri available');
       Alert.alert('Error', 'No recording available. Please record a voice sample first.');
       setError('No recording available. Please record a voice sample first.');
       return;
@@ -388,35 +356,26 @@ export default function VoiceProfileScreen({ onBack, onPaywall }: VoiceProfileSc
 
     // Use durationRef for more reliable duration check
     const durationSeconds = durationRef.current || duration;
-    console.log('📏 Duration check:', {
-      durationSeconds,
-      duration,
-      durationRef: durationRef.current,
-    });
 
     if (durationSeconds < 5) {
       const msg = `Recording too short (${durationSeconds}s). Please record at least 5 seconds of your voice.`;
-      console.error('❌', msg);
       Alert.alert('Recording Too Short', msg);
       setError(msg);
       return;
     }
     if (durationSeconds > 60) {
       const msg = `Recording too long (${durationSeconds}s). Please keep it under 60 seconds.`;
-      console.error('❌', msg);
       Alert.alert('Recording Too Long', msg);
       setError(msg);
       return;
     }
 
     try {
-      console.log('📤 Starting upload process...');
       setState('uploading');
       setError(null);
 
       // Check if file exists
       const fileInfo = await FileSystem.getInfoAsync(audioUri);
-      console.log('📁 File info:', fileInfo);
 
       if (!fileInfo.exists) {
         throw new Error('Audio file not found. Please record again.');
@@ -430,13 +389,6 @@ export default function VoiceProfileScreen({ onBack, onPaywall }: VoiceProfileSc
       } else if (extension === 'm4a') {
         mimeType = 'audio/m4a';
       }
-
-      console.log('📋 Preparing upload', {
-        audioUri,
-        mimeType,
-        durationSeconds,
-        fileSize: fileInfo.size,
-      });
 
       // Get API base URL from config (set in app.json extra or EXPO_PUBLIC_API_BASE_URL env var)
       // On simulator: localhost works. On physical device: use your computer's LAN IP.
@@ -478,16 +430,19 @@ export default function VoiceProfileScreen({ onBack, onPaywall }: VoiceProfileSc
       const timeoutId = setTimeout(() => controller.abort(), 120000); // 120s timeout
 
       // Build headers with Firebase auth token
-      const uploadHeaders: Record<string, string> = {
-        'x-user-id': userId,
-      };
+      const uploadHeaders: Record<string, string> = {};
       try {
         const idToken = await user!.getIdToken();
         if (idToken) {
           uploadHeaders['Authorization'] = `Bearer ${idToken}`;
         }
       } catch {
-        console.warn('⚠️ Could not get Firebase ID token for enrollment');
+        if (__DEV__) {
+          console.warn('Could not get Firebase ID token for enrollment');
+        }
+      }
+      if (__DEV__) {
+        uploadHeaders['x-user-id'] = userId;
       }
 
       let response: Response;
@@ -517,12 +472,6 @@ export default function VoiceProfileScreen({ onBack, onPaywall }: VoiceProfileSc
         throw fetchError;
       }
 
-      console.log('📥 Response received:', {
-        status: response.status,
-        statusText: response.statusText,
-        headers: Object.fromEntries(response.headers.entries()),
-      });
-
       if (!response.ok) {
         // 402 = pro required for re-enrollment → show paywall
         if (response.status === 402) {
@@ -534,25 +483,23 @@ export default function VoiceProfileScreen({ onBack, onPaywall }: VoiceProfileSc
         let errorMessage = 'Failed to enroll voice profile';
         try {
           const contentType = response.headers.get('content-type') || '';
-          console.log('📄 Response content-type:', contentType);
           if (contentType.includes('application/json')) {
             const errorData = await response.json();
-            console.error('❌ Error response JSON:', errorData);
             errorMessage = errorData.error || errorData.message || errorMessage;
           } else {
             const errorText = await response.text();
-            console.error('❌ Error response text:', errorText);
             errorMessage = errorText || errorMessage;
           }
         } catch (parseErr) {
-          console.error('❌ Error parsing error response:', parseErr);
+          if (__DEV__) {
+            console.error('Error parsing voice profile error response:', parseErr);
+          }
           errorMessage = response.statusText || errorMessage;
         }
         throw new ApiClientError(errorMessage, response.status);
       }
 
       const result = await response.json();
-      console.log('✅ Enrollment successful:', result);
 
       setHasProfile(result.hasVoiceProfile);
       setState('complete');
@@ -744,21 +691,10 @@ export default function VoiceProfileScreen({ onBack, onPaywall }: VoiceProfileSc
                 state === 'uploading' && { opacity: 0.7 },
               ]}
               onPress={() => {
-                console.log('🔵🔵🔵 Enroll button PRESSED!', {
-                  duration,
-                  durationRef: durationRef.current,
-                  state,
-                  audioUri,
-                  buttonDisabled:
-                    state === 'uploading' ||
-                    (durationRef.current || duration) < 5 ||
-                    (durationRef.current || duration) > 60,
-                });
                 if (state === 'uploading') {
-                  console.warn('⚠️ Button pressed but state is uploading - ignoring');
                   return;
                 }
-                handleEnroll();
+                void handleEnroll();
               }}
               disabled={
                 state === 'uploading' ||
@@ -816,7 +752,6 @@ export default function VoiceProfileScreen({ onBack, onPaywall }: VoiceProfileSc
                     { backgroundColor: '#f44', marginTop: 15, minWidth: 120 },
                   ]}
                   onPress={() => {
-                    console.log('🛑 Cancel button pressed');
                     if (abortControllerRef.current) {
                       abortControllerRef.current.abort();
                       abortControllerRef.current = null;
@@ -828,19 +763,6 @@ export default function VoiceProfileScreen({ onBack, onPaywall }: VoiceProfileSc
                   <Text style={[styles.enrollButtonText, { color: '#fff' }]}>Cancel</Text>
                 </TouchableOpacity>
               </View>
-            )}
-            {__DEV__ && audioUri && (
-              <TouchableOpacity
-                style={[styles.enrollButton, { backgroundColor: '#ff0', marginTop: 10 }]}
-                onPress={() => {
-                  console.log('🧪 TEST BUTTON PRESSED - Force calling handleEnroll');
-                  handleEnroll();
-                }}
-              >
-                <Text style={[styles.enrollButtonText, { color: '#000' }]}>
-                  🧪 TEST ENROLL (Always Enabled)
-                </Text>
-              </TouchableOpacity>
             )}
           </View>
         )}

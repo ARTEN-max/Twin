@@ -143,9 +143,6 @@ declare const recordingDetailSchema: z.ZodObject<
     id: string;
     status: 'pending' | 'uploaded' | 'processing' | 'complete' | 'failed';
     createdAt: string;
-    durationSec: number | null;
-    hasDebrief: boolean;
-    hasTranscript: boolean;
     transcript: {
       text: string;
       segments: {
@@ -157,6 +154,9 @@ declare const recordingDetailSchema: z.ZodObject<
       }[];
       language?: string | undefined;
     } | null;
+    durationSec: number | null;
+    hasDebrief: boolean;
+    hasTranscript: boolean;
     debriefMarkdown: string | null;
     title?: string | null | undefined;
     speakers?: string[] | undefined;
@@ -165,9 +165,6 @@ declare const recordingDetailSchema: z.ZodObject<
     id: string;
     status: 'pending' | 'uploaded' | 'processing' | 'complete' | 'failed';
     createdAt: string;
-    durationSec: number | null;
-    hasDebrief: boolean;
-    hasTranscript: boolean;
     transcript: {
       text: string;
       segments: {
@@ -179,6 +176,9 @@ declare const recordingDetailSchema: z.ZodObject<
       }[];
       language?: string | undefined;
     } | null;
+    durationSec: number | null;
+    hasDebrief: boolean;
+    hasTranscript: boolean;
     debriefMarkdown: string | null;
     title?: string | null | undefined;
     speakers?: string[] | undefined;
@@ -191,7 +191,7 @@ type RecordingDetail = z.infer<typeof recordingDetailSchema>;
 declare function toRecordingSummary(recording: {
   id: string;
   createdAt: string | Date;
-  duration: number | null;
+  duration?: number | null;
   status: string;
   title: string | null;
   debrief?: {
@@ -208,7 +208,7 @@ declare function toRecordingSummary(recording: {
 declare function toRecordingDetail(recording: {
   id: string;
   createdAt: string | Date;
-  duration: number | null;
+  duration?: number | null;
   status: string;
   title: string | null;
   transcript?: {

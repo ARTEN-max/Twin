@@ -39,28 +39,32 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
   const [isPro, setIsPro] = useState(false);
   const [offerings, setOfferings] = useState<PurchasesOfferings | null>(null);
 
+  const logDevWarning = useCallback((message: string, error: unknown) => {
+    if (__DEV__) {
+      console.warn(message, error);
+    }
+  }, []);
+
   const checkEntitlement = useCallback(async () => {
     try {
       const info = await Purchases.getCustomerInfo();
       const active = info.entitlements.active['Twin Pro'];
       setIsPro(!!active);
     } catch (err) {
-      console.warn('RevenueCat entitlement check failed:', err);
+      logDevWarning('RevenueCat entitlement check failed:', err);
     }
-  }, []);
+  }, [logDevWarning]);
 
   const loadOfferings = useCallback(async () => {
     try {
       const o = await Purchases.getOfferings();
-      console.log('RC offerings:', JSON.stringify(o));
       setOfferings(o);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : JSON.stringify(err);
-      console.warn('RevenueCat offerings fetch failed:', msg);
+      logDevWarning('RevenueCat offerings fetch failed:', err);
       // Silently fail — offerings unavailable means paywall shows no products,
       // which is handled gracefully in PaywallScreen. Never show raw RC errors to users.
     }
-  }, []);
+  }, [logDevWarning]);
 
   const refresh = useCallback(async () => {
     await Promise.all([checkEntitlement(), loadOfferings()]);
@@ -90,28 +94,31 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
         }
         await Promise.all([checkEntitlement(), loadOfferings()]);
       } catch (err) {
-        console.warn('RevenueCat init failed:', err);
+        logDevWarning('RevenueCat init failed:', err);
       } finally {
         setLoading(false);
       }
     };
 
     init();
-  }, [user?.uid, checkEntitlement, loadOfferings]);
+  }, [user?.uid, checkEntitlement, loadOfferings, logDevWarning]);
 
-  const purchase = useCallback(async (pkg: PurchasesPackage): Promise<boolean> => {
-    try {
-      const { customerInfo } = await Purchases.purchasePackage(pkg);
-      const active = customerInfo.entitlements.active['Twin Pro'];
-      setIsPro(!!active);
-      return !!active;
-    } catch (err: unknown) {
-      const rcErr = err as { userCancelled?: boolean };
-      if (rcErr.userCancelled) return false;
-      console.warn('Purchase failed:', err);
-      return false;
-    }
-  }, []);
+  const purchase = useCallback(
+    async (pkg: PurchasesPackage): Promise<boolean> => {
+      try {
+        const { customerInfo } = await Purchases.purchasePackage(pkg);
+        const active = customerInfo.entitlements.active['Twin Pro'];
+        setIsPro(!!active);
+        return !!active;
+      } catch (err: unknown) {
+        const rcErr = err as { userCancelled?: boolean };
+        if (rcErr.userCancelled) return false;
+        logDevWarning('Purchase failed:', err);
+        return false;
+      }
+    },
+    [logDevWarning]
+  );
 
   const restore = useCallback(async (): Promise<boolean> => {
     try {
@@ -120,10 +127,10 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
       setIsPro(!!active);
       return !!active;
     } catch (err) {
-      console.warn('Restore failed:', err);
+      logDevWarning('Restore failed:', err);
       return false;
     }
-  }, []);
+  }, [logDevWarning]);
 
   return (
     <SubscriptionContext.Provider value={{ loading, isPro, offerings, purchase, restore, refresh }}>

@@ -183,42 +183,64 @@ var audioUploadSchema = import_zod.z.object({
 var import_zod3 = require("zod");
 
 // src/apiClient.ts
+function shouldLogDebug() {
+  const maybeDev = globalThis.__DEV__;
+  if (typeof maybeDev === "boolean") {
+    return maybeDev;
+  }
+  return typeof process !== "undefined" ? process.env?.NODE_ENV !== "production" : false;
+}
+function logDebug(message, payload) {
+  if (!shouldLogDebug() || typeof console === "undefined" || !console.log) return;
+  if (payload === void 0) {
+    console.log(message);
+  } else {
+    console.log(message, payload);
+  }
+}
+function warnDebug(message, payload) {
+  if (!shouldLogDebug() || typeof console === "undefined" || !console.warn) return;
+  if (payload === void 0) {
+    console.warn(message);
+  } else {
+    console.warn(message, payload);
+  }
+}
 var getBaseUrl = () => {
   if (typeof process !== "undefined") {
     if (process.env?.EXPO_PUBLIC_API_BASE_URL) {
       const url = process.env.EXPO_PUBLIC_API_BASE_URL;
-      if (typeof console !== "undefined" && console.log) {
-        console.log("[API Client] Using API URL from process.env:", url);
-      }
+      logDebug("[API Client] Using API URL from process.env:", url);
       return url;
     }
     if (process.env?.NEXT_PUBLIC_API_URL) {
       const url = process.env.NEXT_PUBLIC_API_URL;
-      if (typeof console !== "undefined" && console.log) {
-        console.log("[API Client] Using API URL from NEXT_PUBLIC_API_URL:", url);
-      }
+      logDebug("[API Client] Using API URL from NEXT_PUBLIC_API_URL:", url);
       return url;
     }
   }
   if (typeof globalThis !== "undefined" && "window" in globalThis && globalThis.window) {
     const win = globalThis.window;
     if (win?.__API_BASE_URL__) {
-      if (typeof console !== "undefined" && console.log) {
-        console.log(
-          "[API Client] Using API URL from window.__API_BASE_URL__:",
-          win.__API_BASE_URL__
-        );
-      }
+      logDebug("[API Client] Using API URL from window.__API_BASE_URL__:", win.__API_BASE_URL__);
       return win.__API_BASE_URL__;
     }
   }
   const fallbackUrl = "https://twin-production-a0e4.up.railway.app";
-  if (typeof console !== "undefined" && console.warn) {
-    console.warn("[API Client] No API URL found in env, using fallback:", fallbackUrl);
-  }
+  warnDebug("[API Client] No API URL found in env, using fallback:", fallbackUrl);
   return fallbackUrl;
 };
 var _tokenProvider = null;
+function shouldSendLegacyUserIdHeader() {
+  const maybeDev = globalThis.__DEV__;
+  if (typeof maybeDev === "boolean") {
+    return maybeDev;
+  }
+  return typeof process !== "undefined" ? process.env?.NODE_ENV !== "production" : false;
+}
+function buildUserHeaders(userId, extraHeaders = {}) {
+  return shouldSendLegacyUserIdHeader() ? { ...extraHeaders, "x-user-id": userId } : extraHeaders;
+}
 function setTokenProvider(provider) {
   _tokenProvider = provider;
 }
@@ -283,9 +305,7 @@ async function handleResponse(response) {
 async function apiRequest(endpoint, options = {}) {
   const baseUrl = getBaseUrl();
   const url = endpoint.startsWith("http") ? endpoint : `${baseUrl}${endpoint}`;
-  if (typeof console !== "undefined" && console.log) {
-    console.log("[API Client] Request:", { method: options.method || "GET", url, baseUrl });
-  }
+  logDebug("[API Client] Request:", { method: options.method || "GET", url, baseUrl });
   const hasBody = options.body !== void 0 && options.body !== null;
   const headers = {
     ...options.headers
@@ -327,9 +347,7 @@ async function apiRequest(endpoint, options = {}) {
 async function createRecording(userId, params) {
   return apiRequest("/api/recordings", {
     method: "POST",
-    headers: {
-      "x-user-id": userId
-    },
+    headers: buildUserHeaders(userId),
     body: JSON.stringify({
       title: params.title,
       mode: params.mode || "general",
@@ -342,61 +360,60 @@ async function createRecording(userId, params) {
 async function createSession(userId, title) {
   return apiRequest("/api/sessions", {
     method: "POST",
-    headers: { "x-user-id": userId },
+    headers: buildUserHeaders(userId),
     body: JSON.stringify(title ? { title } : {})
   });
 }
 async function getSession(userId, sessionId) {
   return apiRequest(`/api/sessions/${sessionId}`, {
-    headers: { "x-user-id": userId }
+    headers: buildUserHeaders(userId)
   });
 }
 async function triggerSessionDebrief(userId, sessionId) {
   return apiRequest(`/api/sessions/${sessionId}/debrief`, {
     method: "POST",
-    headers: { "x-user-id": userId },
+    headers: buildUserHeaders(userId),
     body: JSON.stringify({})
   });
 }
 async function uploadRecordingFile(userId, recordingId, fileData, contentType) {
   const baseUrl = getBaseUrl();
   const url = `${baseUrl}/api/recordings/${recordingId}/upload`;
-  console.log("[API Client] Upload request:", {
+  logDebug("[API Client] Upload request:", {
     baseUrl,
     url,
     recordingId,
     contentType,
     fileSize: fileData.byteLength || fileData.length
   });
-  const uploadHeaders = {
-    "x-user-id": userId,
+  const uploadHeaders = buildUserHeaders(userId, {
     "Content-Type": contentType
-  };
+  });
   if (_tokenProvider) {
     try {
       const token = await _tokenProvider();
       if (token) {
         uploadHeaders["Authorization"] = `Bearer ${token}`;
-        console.log("[API Client] Auth token included in upload headers");
+        logDebug("[API Client] Auth token included in upload headers");
       } else {
-        console.warn("[API Client] No auth token available for upload");
+        warnDebug("[API Client] No auth token available for upload");
       }
     } catch (error) {
-      console.warn("[API Client] Failed to get auth token:", error);
+      warnDebug("[API Client] Failed to get auth token:", error);
     }
   } else {
-    console.warn("[API Client] No token provider set for upload");
+    warnDebug("[API Client] No token provider set for upload");
   }
-  console.log("[API Client] Upload headers:", {
-    "x-user-id": userId.substring(0, 8) + "...",
+  logDebug("[API Client] Upload headers:", {
     "Content-Type": contentType,
-    "has-auth": !!uploadHeaders["Authorization"]
+    "has-auth": !!uploadHeaders["Authorization"],
+    "has-legacy-user-id": !!uploadHeaders["x-user-id"]
   });
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 6e4);
     const body = fileData instanceof Uint8Array ? fileData : new Uint8Array(fileData);
-    console.log("[API Client] Starting upload fetch:", {
+    logDebug("[API Client] Starting upload fetch:", {
       url,
       contentType,
       bodyType: body instanceof Uint8Array ? "Uint8Array" : typeof body,
@@ -412,7 +429,7 @@ async function uploadRecordingFile(userId, recordingId, fileData, contentType) {
         body,
         signal: controller.signal
       });
-      console.log("[API Client] Upload fetch completed:", {
+      logDebug("[API Client] Upload fetch completed:", {
         status: response.status,
         statusText: response.statusText,
         ok: response.ok
@@ -468,27 +485,24 @@ async function completeUpload(userId, recordingId, params) {
   return apiRequest(`/api/recordings/${recordingId}/complete-upload`, {
     method: "POST",
     headers: {
-      "x-user-id": userId
+      ...buildUserHeaders(userId)
     },
     body: JSON.stringify({
-      fileSize: params?.fileSize
+      fileSize: params?.fileSize,
+      ...params?.transcript ? { transcript: params.transcript } : {}
     })
   });
 }
 async function getRecordingStatus(userId, recordingId) {
   return apiRequest(`/api/recordings/${recordingId}`, {
     method: "GET",
-    headers: {
-      "x-user-id": userId
-    }
+    headers: buildUserHeaders(userId)
   });
 }
 async function getRecordingResult(userId, recordingId) {
   return apiRequest(`/api/recordings/${recordingId}?include=all`, {
     method: "GET",
-    headers: {
-      "x-user-id": userId
-    }
+    headers: buildUserHeaders(userId)
   });
 }
 async function listRecordingsByDay(userId, params) {
@@ -500,9 +514,7 @@ async function listRecordingsByDay(userId, params) {
   const endpoint = `/api/recordings${query ? `?${query}` : ""}`;
   return apiRequest(endpoint, {
     method: "GET",
-    headers: {
-      "x-user-id": userId
-    }
+    headers: buildUserHeaders(userId)
   });
 }
 async function listRecordings(userId, params) {
@@ -520,9 +532,7 @@ async function listRecordings(userId, params) {
     try {
       return await apiRequest(endpoint, {
         method: "GET",
-        headers: {
-          "x-user-id": userId
-        }
+        headers: buildUserHeaders(userId)
       });
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
@@ -547,9 +557,7 @@ async function getRecording(userId, recordingId, includeAll = false) {
     try {
       return await apiRequest(endpoint, {
         method: "GET",
-        headers: {
-          "x-user-id": userId
-        }
+        headers: buildUserHeaders(userId)
       });
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
@@ -570,18 +578,14 @@ async function retryTranscription(userId, recordingId) {
     `/api/recordings/${recordingId}/retry-transcription`,
     {
       method: "POST",
-      headers: {
-        "x-user-id": userId
-      }
+      headers: buildUserHeaders(userId)
     }
   );
 }
 async function getChatSession(userId, date) {
   return apiRequest(`/api/chat/session?date=${date}`, {
     method: "GET",
-    headers: {
-      "x-user-id": userId
-    }
+    headers: buildUserHeaders(userId)
   });
 }
 async function sendChatMessage(userId, params) {
@@ -593,12 +597,11 @@ async function sendChatMessage(userId, params) {
   }
   const baseUrl = getBaseUrl();
   const url = `${baseUrl}/api/chat`;
-  const chatHeaders = {
-    "x-user-id": userId,
+  const chatHeaders = buildUserHeaders(userId, {
     "Content-Type": "application/json",
     Accept: "application/json"
     // Request JSON instead of streaming
-  };
+  });
   if (_tokenProvider) {
     try {
       const token = await _tokenProvider();
@@ -751,9 +754,7 @@ async function sendChatMessage(userId, params) {
 async function getVoiceProfileStatus(userId) {
   return apiRequest("/api/voice-profile/status", {
     method: "GET",
-    headers: {
-      "x-user-id": userId
-    }
+    headers: buildUserHeaders(userId)
   });
 }
 async function enrollVoiceProfile(userId, audioBlob, mimeType = "audio/webm") {
@@ -762,9 +763,7 @@ async function enrollVoiceProfile(userId, audioBlob, mimeType = "audio/webm") {
   const formData = new FormData();
   const file = new File([audioBlob], "voice-sample.webm", { type: mimeType });
   formData.append("audio", file);
-  const enrollHeaders = {
-    "x-user-id": userId
-  };
+  const enrollHeaders = buildUserHeaders(userId);
   if (_tokenProvider) {
     try {
       const token = await _tokenProvider();
@@ -798,39 +797,37 @@ async function enrollVoiceProfile(userId, audioBlob, mimeType = "audio/webm") {
 async function deleteVoiceProfile(userId) {
   return apiRequest("/api/voice-profile", {
     method: "DELETE",
-    headers: {
-      "x-user-id": userId
-    }
+    headers: buildUserHeaders(userId)
   });
 }
 async function getMe(userId) {
   return apiRequest("/api/me", {
     method: "GET",
-    headers: { "x-user-id": userId }
+    headers: buildUserHeaders(userId)
   });
 }
 async function acceptConsent(userId) {
   return apiRequest("/api/me/consent/accept", {
     method: "POST",
-    headers: { "x-user-id": userId }
+    headers: buildUserHeaders(userId)
   });
 }
 async function revokeConsent(userId) {
   return apiRequest("/api/me/consent/revoke", {
     method: "POST",
-    headers: { "x-user-id": userId }
+    headers: buildUserHeaders(userId)
   });
 }
 async function deleteAccountApi(userId) {
   return apiRequest("/api/me", {
     method: "DELETE",
-    headers: { "x-user-id": userId }
+    headers: buildUserHeaders(userId)
   });
 }
 async function deleteRecordingApi(userId, recordingId) {
   return apiRequest(`/api/recordings/${recordingId}`, {
     method: "DELETE",
-    headers: { "x-user-id": userId }
+    headers: buildUserHeaders(userId)
   });
 }
 async function registerPushToken(_userId, token) {
@@ -874,7 +871,7 @@ function toRecordingSummary(recording) {
   return {
     id: recording.id,
     createdAt: typeof recording.createdAt === "string" ? recording.createdAt : recording.createdAt.toISOString(),
-    durationSec: recording.duration,
+    durationSec: recording.duration ?? null,
     status: recording.status,
     title: recording.title || void 0,
     hasDebrief: !!recording.debrief,
@@ -885,7 +882,7 @@ function toRecordingDetail(recording) {
   const summary = {
     id: recording.id,
     createdAt: typeof recording.createdAt === "string" ? recording.createdAt : recording.createdAt.toISOString(),
-    durationSec: recording.duration,
+    durationSec: recording.duration ?? null,
     status: recording.status,
     title: recording.title || void 0,
     hasDebrief: !!recording.debrief,

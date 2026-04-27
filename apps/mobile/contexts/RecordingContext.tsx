@@ -1,4 +1,4 @@
-/* global setTimeout, clearTimeout, console, process */
+/* global setTimeout, clearTimeout, console, process, __DEV__ */
 /**
  * RecordingContext
  *
@@ -413,12 +413,27 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
         } catch (presignedErr) {
           console.error('Presigned upload failed, trying direct API:', presignedErr);
 
+          const directUploadHeaders: Record<string, string> = {
+            'Content-Type': mimeType,
+          };
+          try {
+            const idToken = await user?.getIdToken();
+            if (idToken) {
+              directUploadHeaders['Authorization'] = `Bearer ${idToken}`;
+            }
+          } catch {
+            // Keep the error surface on the upload request itself.
+          }
+          if (__DEV__) {
+            directUploadHeaders['x-user-id'] = userId;
+          }
+
           const direct = await FileSystem.uploadAsync(
             `${process.env.EXPO_PUBLIC_API_BASE_URL}/api/recordings/${createResult.recordingId}/upload`,
             fileUri,
             {
               httpMethod: 'POST',
-              headers: { 'x-user-id': userId, 'Content-Type': mimeType },
+              headers: directUploadHeaders,
               uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
               sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
             }
@@ -460,7 +475,7 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
         setPhase('error');
       }
     },
-    [pollForCompletion, resetRecordingLimits, transcribeOnDevice, userId]
+    [pollForCompletion, resetRecordingLimits, transcribeOnDevice, user, userId]
   );
 
   const stop = useCallback(async () => {

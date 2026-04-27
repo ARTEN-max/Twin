@@ -545,7 +545,9 @@ export default function ChatScreen({ onBack: _onBack, onPaywall }: ChatScreenPro
         />
         <TouchableOpacity
           style={[styles.sendButton, (!inputText.trim() || sending) && styles.sendButtonDisabled]}
-          onPress={handleSend}
+          onPress={() => {
+            void handleSend();
+          }}
           disabled={!inputText.trim() || sending}
         >
           {sending ? (

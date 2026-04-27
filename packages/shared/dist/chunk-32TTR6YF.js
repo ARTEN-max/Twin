@@ -36,7 +36,7 @@ function toRecordingSummary(recording) {
   return {
     id: recording.id,
     createdAt: typeof recording.createdAt === "string" ? recording.createdAt : recording.createdAt.toISOString(),
-    durationSec: recording.duration,
+    durationSec: recording.duration ?? null,
     status: recording.status,
     title: recording.title || void 0,
     hasDebrief: !!recording.debrief,
@@ -47,7 +47,7 @@ function toRecordingDetail(recording) {
   const summary = {
     id: recording.id,
     createdAt: typeof recording.createdAt === "string" ? recording.createdAt : recording.createdAt.toISOString(),
-    durationSec: recording.duration,
+    durationSec: recording.duration ?? null,
     status: recording.status,
     title: recording.title || void 0,
     hasDebrief: !!recording.debrief,
@@ -81,4 +81,4 @@ export {
   toRecordingSummary,
   toRecordingDetail
 };
-//# sourceMappingURL=chunk-6ADLA7ZV.js.map
+//# sourceMappingURL=chunk-32TTR6YF.js.map
