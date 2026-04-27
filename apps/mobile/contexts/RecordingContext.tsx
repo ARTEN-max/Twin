@@ -311,6 +311,58 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  const pollForCompletion = useCallback(
+    async (id: string) => {
+      if (!userId) return;
+      setPhase('processing');
+      setUploadProgress('Processing your recording...');
+
+      let attempts = 0;
+      const maxAttempts = 120;
+      const baseDelay = 2000;
+
+      while (attempts < maxAttempts) {
+        if (pollCancelledRef.current) return;
+        try {
+          const result = await getRecordingStatus(userId, id);
+          if (pollCancelledRef.current) return;
+          setUploadProgress(`Processing... (${result.status})`);
+
+          if (result.status === 'complete') {
+            setUploadProgress('Complete!');
+            setPhase('complete');
+            setLastCompletedRecordingId(id);
+            return;
+          }
+          if (result.status === 'failed') {
+            const msg = result.errorMessage
+              ? `Recording processing failed: ${result.errorMessage}.`
+              : 'Recording processing failed.';
+            throw new Error(msg);
+          }
+
+          const delay = Math.min(baseDelay * Math.pow(2, Math.floor(attempts / 5)), 30000);
+          await new Promise((r) => setTimeout(r, delay));
+          attempts++;
+        } catch (err) {
+          if (pollCancelledRef.current) return;
+          if (err instanceof ApiClientError && err.statusCode === 404) {
+            const delay = Math.min(baseDelay * Math.pow(2, Math.floor(attempts / 5)), 30000);
+            await new Promise((r) => setTimeout(r, delay));
+            attempts++;
+            continue;
+          }
+          throw err;
+        }
+      }
+
+      if (pollCancelledRef.current) return;
+      setError('Processing is taking longer than expected. You can check status later.');
+      setPhase('error');
+    },
+    [userId]
+  );
+
   const uploadFlow = useCallback(
     async (fileUri: string) => {
       if (!userId) return;
@@ -393,7 +445,7 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
         await pollForCompletion(createResult.recordingId);
       } catch (err) {
         if (err instanceof ApiClientError && err.statusCode === 402) {
-          setError(err.error || err.code || 'recording_limit_reached');
+          setError(err.error || err.code || 'audio_minutes_limit_reached');
           setPhase('error');
           return;
         }
@@ -409,58 +461,6 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
       }
     },
     [pollForCompletion, resetRecordingLimits, transcribeOnDevice, userId]
-  );
-
-  const pollForCompletion = useCallback(
-    async (id: string) => {
-      if (!userId) return;
-      setPhase('processing');
-      setUploadProgress('Processing your recording...');
-
-      let attempts = 0;
-      const maxAttempts = 120;
-      const baseDelay = 2000;
-
-      while (attempts < maxAttempts) {
-        if (pollCancelledRef.current) return;
-        try {
-          const result = await getRecordingStatus(userId, id);
-          if (pollCancelledRef.current) return;
-          setUploadProgress(`Processing... (${result.status})`);
-
-          if (result.status === 'complete') {
-            setUploadProgress('Complete!');
-            setPhase('complete');
-            setLastCompletedRecordingId(id);
-            return;
-          }
-          if (result.status === 'failed') {
-            const msg = result.errorMessage
-              ? `Recording processing failed: ${result.errorMessage}.`
-              : 'Recording processing failed.';
-            throw new Error(msg);
-          }
-
-          const delay = Math.min(baseDelay * Math.pow(2, Math.floor(attempts / 5)), 30000);
-          await new Promise((r) => setTimeout(r, delay));
-          attempts++;
-        } catch (err) {
-          if (pollCancelledRef.current) return;
-          if (err instanceof ApiClientError && err.statusCode === 404) {
-            const delay = Math.min(baseDelay * Math.pow(2, Math.floor(attempts / 5)), 30000);
-            await new Promise((r) => setTimeout(r, delay));
-            attempts++;
-            continue;
-          }
-          throw err;
-        }
-      }
-
-      if (pollCancelledRef.current) return;
-      setError('Processing is taking longer than expected. You can check status later.');
-      setPhase('error');
-    },
-    [userId]
   );
 
   const stop = useCallback(async () => {

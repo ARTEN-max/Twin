@@ -6,7 +6,7 @@ import fetch from 'node-fetch';
 import FormData from 'form-data';
 import { db } from '../lib/db.js';
 import type { FirebaseUser } from '../plugins/firebase-auth.js';
-import { getTierLimits } from '../lib/subscription.js';
+import { getEffectiveTier } from '../lib/subscription.js';
 
 function requireUser(request: { firebaseUser?: FirebaseUser | null }): FirebaseUser {
   const user = request.firebaseUser;
@@ -37,9 +37,9 @@ export const voiceProfileRoutes: FastifyPluginAsync = async (fastify) => {
         select: { hasVoiceProfile: true, subscriptionTier: true },
       });
       if (existingUser?.hasVoiceProfile) {
-        const limits = getTierLimits(existingUser.subscriptionTier);
+        const effectiveTier = getEffectiveTier(userId, existingUser.subscriptionTier);
         // Free tier: only 1 enrollment allowed. Re-enrollment requires Pro.
-        if (limits.recordingsPerMonth !== null) {
+        if (effectiveTier !== 'PRO') {
           return reply.code(402).send({
             error: 'pro_required',
             message:

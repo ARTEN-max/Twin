@@ -8,7 +8,7 @@
  * this screen.
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -44,8 +44,6 @@ export default function NewRecordingScreen({
   const userId = user!.uid;
 
   const [localState, setLocalState] = useState<LocalState>(null);
-  const [usedRecordings, setUsedRecordings] = useState<number | null>(null);
-  const [recordingLimit, setRecordingLimit] = useState<number | null>(null);
   const [usedAudioMinutes, setUsedAudioMinutes] = useState<number | null>(null);
   const [audioMinuteLimit, setAudioMinuteLimit] = useState<number | null>(null);
   const [maxMinutesPerRecording, setMaxMinutesPerRecording] = useState<number | null>(null);
@@ -56,32 +54,39 @@ export default function NewRecordingScreen({
 
   // ─── Effects ──────────────────────────────────────────────────
 
-  useEffect(() => {
-    getMe(userId)
+  const refreshUsage = useCallback(() => {
+    return getMe(userId)
       .then((me) => {
-        if (me.subscription) {
-          setUsedRecordings(me.subscription.usage.recordingsThisMonth);
-          setRecordingLimit(me.subscription.limits.recordingsPerMonth);
-          setUsedAudioMinutes(me.subscription.usage.audioMinutesThisMonth);
-          setAudioMinuteLimit(me.subscription.limits.maxAudioMinutesPerMonth);
-          setMaxMinutesPerRecording(me.subscription.limits.maxMinutesPerRecording);
+        if (!me.subscription) {
+          setUsedAudioMinutes(null);
+          setAudioMinuteLimit(null);
+          setMaxMinutesPerRecording(null);
+          return;
         }
+        setUsedAudioMinutes(me.subscription.usage.audioMinutesThisMonth);
+        setAudioMinuteLimit(me.subscription.limits.maxAudioMinutesPerMonth);
+        setMaxMinutesPerRecording(me.subscription.limits.maxMinutesPerRecording);
       })
       .catch(() => {});
   }, [userId]);
+
+  useEffect(() => {
+    void refreshUsage();
+  }, [refreshUsage]);
 
   // Hand-off to parent when the recording finishes (and is acknowledged here).
   useEffect(() => {
     if (recording.lastCompletedRecordingId) {
       const id = recording.lastCompletedRecordingId;
       const t = setTimeout(() => {
+        void refreshUsage();
         recording.acknowledgeComplete();
         onComplete(id);
       }, 500);
       return () => clearTimeout(t);
     }
     return undefined;
-  }, [recording.lastCompletedRecordingId, recording, onComplete]);
+  }, [recording.lastCompletedRecordingId, recording, onComplete, refreshUsage]);
 
   // Surface subscription-limit 402s → paywall
   useEffect(() => {
@@ -89,11 +94,12 @@ export default function NewRecordingScreen({
       recording.error === 'recording_limit_reached' ||
       recording.error === 'audio_minutes_limit_reached'
     ) {
+      void refreshUsage();
       const reason = recording.error;
       recording.acknowledgeError();
       onPaywall?.(reason);
     }
-  }, [recording.error, recording, onPaywall]);
+  }, [recording.error, recording, onPaywall, refreshUsage]);
 
   // ─── Animations ───────────────────────────────────────────────
 
@@ -258,20 +264,13 @@ export default function NewRecordingScreen({
     if (recording.phase === 'idle' || localState === 'requesting-permission') {
       return (
         <View style={styles.mainContent}>
-          {usedRecordings !== null && recordingLimit !== null && (
+          {usedAudioMinutes !== null && audioMinuteLimit !== null && (
             <>
               <View style={styles.usagePill}>
                 <Text style={styles.usagePillText}>
-                  {usedRecordings} of {recordingLimit} recordings
+                  {usedAudioMinutes} of {audioMinuteLimit} free minutes used
                 </Text>
               </View>
-              {usedAudioMinutes !== null && audioMinuteLimit !== null && (
-                <View style={[styles.usagePill, styles.usagePillSecondary]}>
-                  <Text style={styles.usagePillText}>
-                    {usedAudioMinutes} of {audioMinuteLimit} free minutes used
-                  </Text>
-                </View>
-              )}
               {maxMinutesPerRecording !== null && (
                 <Text style={styles.limitHint}>
                   Free recordings auto-stop at {maxMinutesPerRecording} minutes and process
@@ -438,9 +437,6 @@ const styles = StyleSheet.create({
     fontFamily: theme.fontMono,
     fontSize: 12,
     color: theme.textSecondary,
-  },
-  usagePillSecondary: {
-    marginTop: 10,
   },
   limitHint: {
     marginTop: 12,

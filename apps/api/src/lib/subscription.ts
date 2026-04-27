@@ -36,7 +36,7 @@ export interface TierLimits {
 
 export const TIER_LIMITS: Record<string, TierLimits> = {
   FREE: {
-    recordingsPerMonth: 5,
+    recordingsPerMonth: null,
     maxMinutesPerRecording: 20, // Enough to experience the product without funding all-day free sessions
     maxAudioMinutesPerMonth: 120, // 2 hours/month — multiple real trials without uncapped spend
     chatMessagesPerDay: 20,
@@ -53,6 +53,10 @@ export const TIER_LIMITS: Record<string, TierLimits> = {
 
 export function getTierLimits(tier: string): TierLimits {
   return TIER_LIMITS[tier] ?? TIER_LIMITS['FREE']!;
+}
+
+export function getEffectiveTier(userId: string, tier: string): string {
+  return isTester(userId) ? 'PRO' : tier;
 }
 
 // ─── Recording limit ──────────────────────────────────────────
