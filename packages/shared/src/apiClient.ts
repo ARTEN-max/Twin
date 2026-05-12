@@ -2,7 +2,7 @@
 /**
  * Shared API Client for Mobile and Web
  *
- * Provides typed wrappers around fetch for the Komuchi API.
+ * Provides typed wrappers around fetch for the Twin API.
  * All endpoint strings are centralized here.
  */
 
@@ -84,9 +84,10 @@ const getBaseUrl = (): string => {
 
 /**
  * Function that returns the current Firebase ID token (or null).
+ * `forceRefresh` can be used after a 401 to request a fresh token from Firebase.
  * Set this once from AuthProvider so every request is authenticated.
  */
-type TokenProvider = () => Promise<string | null>;
+type TokenProvider = (forceRefresh?: boolean) => Promise<string | null>;
 
 let _tokenProvider: TokenProvider | null = null;
 
@@ -111,6 +112,30 @@ function buildUserHeaders(
  */
 export function setTokenProvider(provider: TokenProvider | null): void {
   _tokenProvider = provider;
+}
+
+async function attachAuthHeader(
+  headers: Record<string, string>,
+  forceRefresh = false
+): Promise<boolean> {
+  if (_tokenProvider || headers['Authorization'] || headers['authorization']) {
+    if (_tokenProvider && !headers['Authorization'] && !headers['authorization']) {
+      try {
+        const token = await _tokenProvider(forceRefresh);
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+          return true;
+        }
+        warnDebug('[API Client] Token provider returned no auth token', { forceRefresh });
+      } catch {
+        // Token retrieval failed – continue without auth header
+      }
+    }
+    return !!headers['Authorization'] || !!headers['authorization'];
+  }
+
+  warnDebug('[API Client] No token provider configured for request');
+  return false;
 }
 
 // ============================================
@@ -217,28 +242,47 @@ async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promi
     headers['Content-Type'] = 'application/json';
   }
 
-  // Attach Firebase ID token if a provider has been set
-  if (_tokenProvider && !headers['Authorization'] && !headers['authorization']) {
-    try {
-      const token = await _tokenProvider();
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-    } catch {
-      // Token retrieval failed – continue without auth header
-    }
-  }
+  const autoAttachedAuth = await attachAuthHeader(headers);
+  logDebug('[API Client] Auth header status:', {
+    hasAuth: !!headers['Authorization'] || !!headers['authorization'],
+    autoAttachedAuth,
+  });
 
   // Add timeout to prevent long hangs (10 seconds)
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 10000);
 
   try {
-    const response = await fetch(url, {
+    let response = await fetch(url, {
       ...options,
       headers,
       signal: controller.signal,
     });
+
+    if (response.status === 401 && autoAttachedAuth && _tokenProvider) {
+      warnDebug(
+        '[API Client] Request returned 401 after sending auth header; retrying with refreshed token'
+      );
+      const retryHeaders: Record<string, string> = {
+        ...(options.headers as Record<string, string>),
+      };
+      if (hasBody && !retryHeaders['Content-Type'] && !retryHeaders['content-type']) {
+        retryHeaders['Content-Type'] = 'application/json';
+      }
+      const refreshedAuth = await attachAuthHeader(retryHeaders, true);
+      if (refreshedAuth) {
+        response = await fetch(url, {
+          ...options,
+          headers: retryHeaders,
+          signal: controller.signal,
+        });
+      }
+    } else if (response.status === 401) {
+      warnDebug('[API Client] Request returned 401 without an attached auth header', {
+        hasTokenProvider: !!_tokenProvider,
+      });
+    }
+
     clearTimeout(timeoutId);
     return handleResponse<T>(response);
   } catch (error: unknown) {
@@ -404,18 +448,11 @@ export async function uploadRecordingFile(
   const uploadHeaders: Record<string, string> = buildUserHeaders(userId, {
     'Content-Type': contentType,
   });
-  if (_tokenProvider) {
-    try {
-      const token = await _tokenProvider();
-      if (token) {
-        uploadHeaders['Authorization'] = `Bearer ${token}`;
-        logDebug('[API Client] Auth token included in upload headers');
-      } else {
-        warnDebug('[API Client] No auth token available for upload');
-      }
-    } catch (error) {
-      warnDebug('[API Client] Failed to get auth token:', error);
-    }
+  const hasUploadAuth = await attachAuthHeader(uploadHeaders);
+  if (hasUploadAuth) {
+    logDebug('[API Client] Auth token included in upload headers');
+  } else if (_tokenProvider) {
+    warnDebug('[API Client] No auth token available for upload');
   } else {
     warnDebug('[API Client] No token provider set for upload');
   }
@@ -451,6 +488,20 @@ export async function uploadRecordingFile(
         body: body,
         signal: controller.signal,
       });
+      if (response.status === 401 && hasUploadAuth && _tokenProvider) {
+        const retryHeaders: Record<string, string> = buildUserHeaders(userId, {
+          'Content-Type': contentType,
+        });
+        const refreshedAuth = await attachAuthHeader(retryHeaders, true);
+        if (refreshedAuth) {
+          response = await fetch(url, {
+            method: 'POST',
+            headers: retryHeaders,
+            body: body,
+            signal: controller.signal,
+          });
+        }
+      }
       logDebug('[API Client] Upload fetch completed:', {
         status: response.status,
         statusText: response.statusText,
@@ -790,14 +841,7 @@ export async function sendChatMessage(
     'Content-Type': 'application/json',
     Accept: 'application/json', // Request JSON instead of streaming
   });
-  if (_tokenProvider) {
-    try {
-      const token = await _tokenProvider();
-      if (token) chatHeaders['Authorization'] = `Bearer ${token}`;
-    } catch {
-      /* continue without token */
-    }
-  }
+  const hasChatAuth = await attachAuthHeader(chatHeaders);
 
   let response: Response;
   try {
@@ -811,6 +855,23 @@ export async function sendChatMessage(
         date: params.date,
       }),
     });
+    if (response.status === 401 && hasChatAuth && _tokenProvider) {
+      const retryHeaders: Record<string, string> = buildUserHeaders(userId, {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      });
+      const refreshedAuth = await attachAuthHeader(retryHeaders, true);
+      if (refreshedAuth) {
+        response = await fetch(url, {
+          method: 'POST',
+          headers: retryHeaders,
+          body: JSON.stringify({
+            messages: params.messages,
+            date: params.date,
+          }),
+        });
+      }
+    }
   } catch (fetchError) {
     // Network error - API server likely not running
     throw new ApiClientError(
@@ -1012,20 +1073,25 @@ export async function enrollVoiceProfile(
 
   // Build headers – include auth token if available
   const enrollHeaders: Record<string, string> = buildUserHeaders(userId);
-  if (_tokenProvider) {
-    try {
-      const token = await _tokenProvider();
-      if (token) enrollHeaders['Authorization'] = `Bearer ${token}`;
-    } catch {
-      /* continue without token */
-    }
-  }
+  const hasEnrollAuth = await attachAuthHeader(enrollHeaders);
 
-  const response = await fetch(url, {
+  let response = await fetch(url, {
     method: 'POST',
     headers: enrollHeaders,
     body: formData,
   });
+
+  if (response.status === 401 && hasEnrollAuth && _tokenProvider) {
+    const retryHeaders: Record<string, string> = buildUserHeaders(userId);
+    const refreshedAuth = await attachAuthHeader(retryHeaders, true);
+    if (refreshedAuth) {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: retryHeaders,
+        body: formData,
+      });
+    }
+  }
 
   if (!response.ok) {
     let errorMessage = 'Failed to enroll voice profile';

@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Twin",
-    "slug": "komuchi-mobile",
+    "slug": "twin-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -51,10 +51,10 @@
         "projectId": "93a39f3c-bb57-469c-af3e-d87bf9c017f0"
       },
       "EXPO_PUBLIC_API_BASE_URL": "https://twin-production-a0e4.up.railway.app",
-      "EXPO_PUBLIC_FIREBASE_API_KEY": "",
-      "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "",
-      "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "",
-      "EXPO_PUBLIC_FIREBASE_APP_ID": "",
+      "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyDODEUf0TgWMszRv1EH_VMK9wtdFwEd9CE",
+      "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "twin-cdd01.firebaseapp.com",
+      "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "twin-cdd01",
+      "EXPO_PUBLIC_FIREBASE_APP_ID": "1:1034213917033:web:b0e425b4fcdee4e986fdf8",
       "EXPO_PUBLIC_PRIVACY_POLICY_URL": "",
       "EXPO_PUBLIC_TERMS_URL": "",
       "EXPO_PUBLIC_SUPPORT_EMAIL": ""

@@ -12,11 +12,57 @@
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import type * as FirebaseAdmin from 'firebase-admin';
+import { cert, getApps, initializeApp } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
+import { isProduction } from '../lib/env.js';
 
 // ── Firebase Admin lazy-init ─────────────────────────────────
 
 let _adminAuth: FirebaseAdmin.auth.Auth | null = null;
 let _initAttempted = false;
+
+function parseServiceAccountJson(rawValue: string): FirebaseAdmin.ServiceAccount {
+  const attempts: string[] = [];
+  let normalized = rawValue.trim();
+  attempts.push(normalized);
+
+  // Some secret UIs wrap JSON in an extra quoted layer.
+  if (
+    (normalized.startsWith('"') && normalized.endsWith('"')) ||
+    (normalized.startsWith("'") && normalized.endsWith("'"))
+  ) {
+    try {
+      const unwrapped = JSON.parse(normalized) as string;
+      if (typeof unwrapped === 'string') {
+        normalized = unwrapped.trim();
+        attempts.push(normalized);
+      }
+    } catch {
+      // Fall through to later attempts.
+    }
+  }
+
+  // Repair malformed JSON where the private key contains literal newlines.
+  const repairedPrivateKey = normalized.replace(
+    /"private_key"\s*:\s*"([\s\S]*?)",\s*"client_email"/,
+    (_match, privateKey) =>
+      `"private_key":"${String(privateKey).replace(/\r?\n/g, '\\n')}","client_email"`
+  );
+  if (repairedPrivateKey !== normalized) {
+    attempts.push(repairedPrivateKey);
+  }
+
+  let lastError: unknown;
+  for (const attempt of attempts) {
+    try {
+      return JSON.parse(attempt) as FirebaseAdmin.ServiceAccount;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError;
+}
 
 async function getFirebaseAuth(): Promise<FirebaseAdmin.auth.Auth | null> {
   if (_initAttempted) return _adminAuth;
@@ -31,34 +77,38 @@ async function getFirebaseAuth(): Promise<FirebaseAdmin.auth.Auth | null> {
   }
 
   try {
-    const admin = await import('firebase-admin');
-
     // Parse optional service account JSON
     const saJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
     let credential: FirebaseAdmin.credential.Credential | undefined;
 
     if (saJson) {
       try {
-        const serviceAccount = JSON.parse(saJson);
-        credential = admin.credential.cert(serviceAccount);
-      } catch {
-        console.warn('⚠️  Could not parse FIREBASE_SERVICE_ACCOUNT_JSON – falling back to ADC');
+        const serviceAccount = parseServiceAccountJson(saJson);
+        credential = cert(serviceAccount);
+      } catch (err) {
+        console.warn('⚠️  Could not initialize FIREBASE_SERVICE_ACCOUNT_JSON credential:', err);
+        if (isProduction()) {
+          throw err;
+        }
       }
     }
 
     const app =
-      admin.apps.length > 0
-        ? admin.apps[0]!
-        : admin.initializeApp({
+      getApps().length > 0
+        ? getApps()[0]!
+        : initializeApp({
             projectId,
             ...(credential ? { credential } : {}),
           });
 
-    _adminAuth = app.auth();
+    _adminAuth = getAuth(app);
     console.log(`🔐 Firebase Auth enabled (project: ${projectId})`);
     return _adminAuth;
   } catch (err) {
     console.error('❌ Failed to initialise Firebase Admin:', err);
+    if (isProduction()) {
+      throw err;
+    }
     return null;
   }
 }
@@ -79,11 +129,10 @@ declare module 'fastify' {
 // ── Plugin ───────────────────────────────────────────────────
 
 const UNPROTECTED_PREFIXES = ['/api/health', '/api/ready'];
-const allowLegacyHeaderAuth = process.env.NODE_ENV !== 'production';
-
 export async function registerFirebaseAuth(app: FastifyInstance): Promise<void> {
   // Eagerly try to init so we log once at startup
   const adminAuth = await getFirebaseAuth();
+  const allowLegacyHeaderAuth = !isProduction();
 
   app.addHook('onRequest', async (request: FastifyRequest, reply: FastifyReply) => {
     // Skip auth for health / readiness probes
@@ -131,9 +180,16 @@ export async function registerFirebaseAuth(app: FastifyInstance): Promise<void> 
           : 'Authentication required. Provide a valid Bearer token.',
       });
     } else {
+      if (!allowLegacyHeaderAuth) {
+        return reply.status(500).send({
+          error: 'AuthConfigurationError',
+          message: 'Server authentication is not configured correctly.',
+        });
+      }
+
       // ── Firebase NOT configured – legacy x-user-id mode outside production only ─
       const headerUserId = request.headers['x-user-id'] as string | undefined;
-      if (allowLegacyHeaderAuth && headerUserId) {
+      if (headerUserId) {
         request.firebaseUser = {
           uid: headerUserId,
           email: '',
