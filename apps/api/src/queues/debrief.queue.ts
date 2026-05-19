@@ -52,7 +52,7 @@ export function startDebriefWorker(): Worker<DebriefJobData, DebriefResult> | nu
         log(`Debrief generated: ${debriefResult.sections.length} sections`);
         await job.updateProgress(70);
 
-        // Step 3: Save debrief to database (upsert so retries overwrite old/mock debriefs)
+        // Step 3: Save debrief to database (upsert so retries are idempotent)
         log('Saving debrief to database');
         const debrief = await db.debrief.upsert({
           where: { recordingId },

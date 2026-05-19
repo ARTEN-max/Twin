@@ -51,8 +51,8 @@ const envSchema = z.object({
 
   // AI Services (OPENAI_API_KEY is only required when DEBRIEF_PROVIDER=openai)
   OPENAI_API_KEY: z.string().optional(),
-  TRANSCRIPTION_PROVIDER: z.enum(['deepgram', 'openai', 'whisper-local', 'mock']).default('mock'),
-  DEBRIEF_PROVIDER: z.enum(['openai', 'mock']).default('mock'),
+  TRANSCRIPTION_PROVIDER: z.enum(['deepgram', 'openai', 'whisper-local', 'mock']).default('openai'),
+  DEBRIEF_PROVIDER: z.enum(['openai']).default('openai'),
   DEEPGRAM_API_KEY: z.string().min(1).optional(),
 
   // Local Whisper (optional)
