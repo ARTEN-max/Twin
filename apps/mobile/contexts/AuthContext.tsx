@@ -11,7 +11,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import { auth } from '../lib/firebase';
-import { setTokenProvider } from '@komuchi/shared';
+import { setTokenProvider } from '@twin/shared';
 
 interface AuthContextValue {
   /** The currently signed-in Firebase user, or null */
@@ -36,10 +36,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // Configure the shared API client to attach the ID token
       if (firebaseUser) {
-        setTokenProvider(async () => {
+        setTokenProvider(async (forceRefresh = false) => {
+          // Prefer the live `auth.currentUser` (always reflects the latest
+          // Firebase state), but fall back to the user from the listener
+          // closure in case `currentUser` is briefly null during rehydration
+          // or right after Fast Refresh.
+          const userRef = auth.currentUser ?? firebaseUser;
+          if (!userRef) return null;
           try {
-            return await firebaseUser.getIdToken();
-          } catch {
+            return await userRef.getIdToken(forceRefresh);
+          } catch (error) {
+            console.error('[AuthContext] Failed to get Firebase ID token:', error);
             return null;
           }
         });
@@ -51,11 +58,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return unsubscribe;
   }, []);
 
-  return (
-    <AuthContext.Provider value={{ user, loading }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={{ user, loading }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth(): AuthContextValue {

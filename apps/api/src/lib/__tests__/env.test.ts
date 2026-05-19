@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { validateEnv, getEnv, isProduction, isDevelopment, isTest } from '../env.js';
+import { validateEnv, isProduction, isDevelopment, isTest, resetValidatedEnv } from '../env.js';
 
 describe('Environment Configuration', () => {
   const originalEnv = process.env;
@@ -7,11 +7,11 @@ describe('Environment Configuration', () => {
   beforeEach(() => {
     vi.resetModules();
     process.env = { ...originalEnv };
-    // Reset validated env cache
-    delete (global as any).__validatedEnv;
+    resetValidatedEnv();
   });
 
   it('should validate environment with required fields', () => {
+    Reflect.deleteProperty(process.env, 'NODE_ENV');
     process.env.DATABASE_URL = 'file:./test.db';
     process.env.S3_BUCKET = 'test-bucket';
     process.env.S3_REGION = 'us-east-1';
@@ -26,6 +26,7 @@ describe('Environment Configuration', () => {
   });
 
   it('should use default values for optional fields', () => {
+    Reflect.deleteProperty(process.env, 'NODE_ENV');
     process.env.DATABASE_URL = 'file:./test.db';
     process.env.S3_BUCKET = 'test-bucket';
     process.env.S3_REGION = 'us-east-1';

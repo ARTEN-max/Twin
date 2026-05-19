@@ -1,4 +1,3 @@
-/* global process, console, __DEV__ */
 /**
  * SubscriptionContext
  *

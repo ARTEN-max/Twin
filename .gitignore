@@ -4,10 +4,13 @@ node_modules
 
 # Build outputs
 dist
-!packages/shared/dist
 .next
 out
 build
+ios/build
+apps/mobile/ios/build
+apps/mobile/android/build
+apps/mobile/vendor-shared
 
 # Turbo
 .turbo
@@ -24,6 +27,8 @@ build
 *.swp
 *.swo
 .DS_Store
+.expo
+apps/mobile/.expo
 
 # Logs
 logs
@@ -40,6 +45,7 @@ coverage
 # Misc
 *.tsbuildinfo
 *.local
+apps/mobile/tsconfig.tsbuildinfo
 
 # Python
 venv/

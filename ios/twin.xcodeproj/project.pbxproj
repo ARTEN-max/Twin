@@ -12,24 +12,24 @@
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
 		3F853D9FC67FDA8F4B74C47A /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = FB6A8AEA4539442EFF409BFD /* PrivacyInfo.xcprivacy */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
-		DDE1F0053F5C30E5689A8788 /* libPods-komuchi.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 08ED421773A9920D0658B65D /* libPods-komuchi.a */; };
+		DDE1F0053F5C30E5689A8788 /* libPods-twin.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 08ED421773A9920D0658B65D /* libPods-twin.a */; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		08ED421773A9920D0658B65D /* libPods-komuchi.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-komuchi.a"; sourceTree = BUILT_PRODUCTS_DIR; };
-		13B07F961A680F5B00A75B9A /* komuchi.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = komuchi.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = komuchi/Images.xcassets; sourceTree = "<group>"; };
-		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = komuchi/Info.plist; sourceTree = "<group>"; };
-		47B5AE1A152E3CCF534C75C3 /* Pods-komuchi.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-komuchi.release.xcconfig"; path = "Target Support Files/Pods-komuchi/Pods-komuchi.release.xcconfig"; sourceTree = "<group>"; };
-		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = komuchi/SplashScreen.storyboard; sourceTree = "<group>"; };
-		B7282C35C8E36556C5463742 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-komuchi/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
+		08ED421773A9920D0658B65D /* libPods-twin.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-twin.a"; sourceTree = BUILT_PRODUCTS_DIR; };
+		13B07F961A680F5B00A75B9A /* twin.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = twin.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = twin/Images.xcassets; sourceTree = "<group>"; };
+		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = twin/Info.plist; sourceTree = "<group>"; };
+		47B5AE1A152E3CCF534C75C3 /* Pods-twin.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-twin.release.xcconfig"; path = "Target Support Files/Pods-twin/Pods-twin.release.xcconfig"; sourceTree = "<group>"; };
+		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = twin/SplashScreen.storyboard; sourceTree = "<group>"; };
+		B7282C35C8E36556C5463742 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-twin/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
-		DCF28B62B3D97C887878763C /* Pods-komuchi.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-komuchi.debug.xcconfig"; path = "Target Support Files/Pods-komuchi/Pods-komuchi.debug.xcconfig"; sourceTree = "<group>"; };
+		DCF28B62B3D97C887878763C /* Pods-twin.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-twin.debug.xcconfig"; path = "Target Support Files/Pods-twin/Pods-twin.debug.xcconfig"; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
-		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = komuchi/AppDelegate.swift; sourceTree = "<group>"; };
-		F11748442D0722820044C1D9 /* komuchi-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "komuchi-Bridging-Header.h"; path = "komuchi/komuchi-Bridging-Header.h"; sourceTree = "<group>"; };
-		FB6A8AEA4539442EFF409BFD /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; name = PrivacyInfo.xcprivacy; path = komuchi/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = twin/AppDelegate.swift; sourceTree = "<group>"; };
+		F11748442D0722820044C1D9 /* twin-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "twin-Bridging-Header.h"; path = "twin/twin-Bridging-Header.h"; sourceTree = "<group>"; };
+		FB6A8AEA4539442EFF409BFD /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; name = PrivacyInfo.xcprivacy; path = twin/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -37,32 +37,32 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				DDE1F0053F5C30E5689A8788 /* libPods-komuchi.a in Frameworks */,
+				DDE1F0053F5C30E5689A8788 /* libPods-twin.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		13B07FAE1A68108700A75B9A /* komuchi */ = {
+		13B07FAE1A68108700A75B9A /* twin */ = {
 			isa = PBXGroup;
 			children = (
 				F11748412D0307B40044C1D9 /* AppDelegate.swift */,
-				F11748442D0722820044C1D9 /* komuchi-Bridging-Header.h */,
+				F11748442D0722820044C1D9 /* twin-Bridging-Header.h */,
 				BB2F792B24A3F905000567C9 /* Supporting */,
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */,
 				FB6A8AEA4539442EFF409BFD /* PrivacyInfo.xcprivacy */,
 			);
-			name = komuchi;
+			name = twin;
 			sourceTree = "<group>";
 		};
 		2D16E6871FA4F8E400B85C8A /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
 				ED297162215061F000B7C4FE /* JavaScriptCore.framework */,
-				08ED421773A9920D0658B65D /* libPods-komuchi.a */,
+				08ED421773A9920D0658B65D /* libPods-twin.a */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -70,7 +70,7 @@
 		5035FA8381DCA6CE6485A412 /* ExpoModulesProviders */ = {
 			isa = PBXGroup;
 			children = (
-				A3111931879F3B5C5BC366BC /* komuchi */,
+				A3111931879F3B5C5BC366BC /* twin */,
 			);
 			name = ExpoModulesProviders;
 			sourceTree = "<group>";
@@ -85,7 +85,7 @@
 		83CBB9F61A601CBA00E9B192 = {
 			isa = PBXGroup;
 			children = (
-				13B07FAE1A68108700A75B9A /* komuchi */,
+				13B07FAE1A68108700A75B9A /* twin */,
 				832341AE1AAA6A7D00B99B32 /* Libraries */,
 				83CBBA001A601CBA00E9B192 /* Products */,
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
@@ -100,17 +100,17 @@
 		83CBBA001A601CBA00E9B192 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				13B07F961A680F5B00A75B9A /* komuchi.app */,
+				13B07F961A680F5B00A75B9A /* twin.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
 		};
-		A3111931879F3B5C5BC366BC /* komuchi */ = {
+		A3111931879F3B5C5BC366BC /* twin */ = {
 			isa = PBXGroup;
 			children = (
 				B7282C35C8E36556C5463742 /* ExpoModulesProvider.swift */,
 			);
-			name = komuchi;
+			name = twin;
 			sourceTree = "<group>";
 		};
 		BB2F792B24A3F905000567C9 /* Supporting */ = {
@@ -119,14 +119,14 @@
 				BB2F792C24A3F905000567C9 /* Expo.plist */,
 			);
 			name = Supporting;
-			path = komuchi/Supporting;
+			path = twin/Supporting;
 			sourceTree = "<group>";
 		};
 		BEE5D9E7CCC31B4E56421F65 /* Pods */ = {
 			isa = PBXGroup;
 			children = (
-				DCF28B62B3D97C887878763C /* Pods-komuchi.debug.xcconfig */,
-				47B5AE1A152E3CCF534C75C3 /* Pods-komuchi.release.xcconfig */,
+				DCF28B62B3D97C887878763C /* Pods-twin.debug.xcconfig */,
+				47B5AE1A152E3CCF534C75C3 /* Pods-twin.release.xcconfig */,
 			);
 			name = Pods;
 			path = Pods;
@@ -135,9 +135,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		13B07F861A680F5B00A75B9A /* komuchi */ = {
+		13B07F861A680F5B00A75B9A /* twin */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "komuchi" */;
+			buildConfigurationList = 13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "twin" */;
 			buildPhases = (
 				08A4A3CD28434E44B6B9DE2E /* [CP] Check Pods Manifest.lock */,
 				326FD3BDA3CA72F95BEF93B3 /* [Expo] Configure project */,
@@ -152,9 +152,9 @@
 			);
 			dependencies = (
 			);
-			name = komuchi;
-			productName = komuchi;
-			productReference = 13B07F961A680F5B00A75B9A /* komuchi.app */;
+			name = twin;
+			productName = twin;
+			productReference = 13B07F961A680F5B00A75B9A /* twin.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -170,7 +170,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 83CBB9FA1A601CBA00E9B192 /* Build configuration list for PBXProject "komuchi" */;
+			buildConfigurationList = 83CBB9FA1A601CBA00E9B192 /* Build configuration list for PBXProject "twin" */;
 			compatibilityVersion = "Xcode 3.2";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -183,7 +183,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				13B07F861A680F5B00A75B9A /* komuchi */,
+				13B07F861A680F5B00A75B9A /* twin */,
 			);
 		};
 /* End PBXProject section */
@@ -235,7 +235,7 @@
 			outputFileListPaths = (
 			);
 			outputPaths = (
-				"$(DERIVED_FILE_DIR)/Pods-komuchi-checkManifestLockResult.txt",
+				"$(DERIVED_FILE_DIR)/Pods-twin-checkManifestLockResult.txt",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -253,18 +253,18 @@
 			inputPaths = (
 				"$(SRCROOT)/.xcode.env",
 				"$(SRCROOT)/.xcode.env.local",
-				"$(SRCROOT)/komuchi/komuchi.entitlements",
-				"$(SRCROOT)/Pods/Target Support Files/Pods-komuchi/expo-configure-project.sh",
+				"$(SRCROOT)/twin/twin.entitlements",
+				"$(SRCROOT)/Pods/Target Support Files/Pods-twin/expo-configure-project.sh",
 			);
 			name = "[Expo] Configure project";
 			outputFileListPaths = (
 			);
 			outputPaths = (
-				"$(SRCROOT)/Pods/Target Support Files/Pods-komuchi/ExpoModulesProvider.swift",
+				"$(SRCROOT)/Pods/Target Support Files/Pods-twin/ExpoModulesProvider.swift",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "# This script configures Expo modules and generates the modules provider file.\nbash -l -c \"./Pods/Target\\ Support\\ Files/Pods-komuchi/expo-configure-project.sh\"\n";
+			shellScript = "# This script configures Expo modules and generates the modules provider file.\nbash -l -c \"./Pods/Target\\ Support\\ Files/Pods-twin/expo-configure-project.sh\"\n";
 		};
 		6066614D57FF48C41CADF5C4 /* [CP] Embed Pods Frameworks */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -272,7 +272,7 @@
 			files = (
 			);
 			inputPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-komuchi/Pods-komuchi-frameworks.sh",
+				"${PODS_ROOT}/Target Support Files/Pods-twin/Pods-twin-frameworks.sh",
 				"${PODS_XCFRAMEWORKS_BUILD_DIR}/React-Core-prebuilt/React.framework/React",
 				"${PODS_XCFRAMEWORKS_BUILD_DIR}/ReactNativeDependencies/ReactNativeDependencies.framework/ReactNativeDependencies",
 				"${PODS_XCFRAMEWORKS_BUILD_DIR}/hermes-engine/Pre-built/hermes.framework/hermes",
@@ -285,7 +285,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-komuchi/Pods-komuchi-frameworks.sh\"\n";
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-twin/Pods-twin-frameworks.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
 		800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */ = {
@@ -294,7 +294,7 @@
 			files = (
 			);
 			inputPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-komuchi/Pods-komuchi-resources.sh",
+				"${PODS_ROOT}/Target Support Files/Pods-twin/Pods-twin-resources.sh",
 				"${PODS_CONFIGURATION_BUILD_DIR}/EXConstants/EXConstants.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/EXConstants/ExpoConstants_privacy.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/ExpoFileSystem/ExpoFileSystem_privacy.bundle",
@@ -311,7 +311,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-komuchi/Pods-komuchi-resources.sh\"\n";
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-twin/Pods-twin-resources.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
 /* End PBXShellScriptBuildPhase section */
@@ -331,18 +331,18 @@
 /* Begin XCBuildConfiguration section */
 		13B07F941A680F5B00A75B9A /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = DCF28B62B3D97C887878763C /* Pods-komuchi.debug.xcconfig */;
+			baseConfigurationReference = DCF28B62B3D97C887878763C /* Pods-twin.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
-				CODE_SIGN_ENTITLEMENTS = komuchi/komuchi.entitlements;
+				CODE_SIGN_ENTITLEMENTS = twin/twin.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_BITCODE = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
 					"FB_SONARKIT_ENABLED=1",
 				);
-				INFOPLIST_FILE = komuchi/Info.plist;
+				INFOPLIST_FILE = twin/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -355,9 +355,9 @@
 					"-lc++",
 				);
 				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_DEBUG";
-				PRODUCT_BUNDLE_IDENTIFIER = com.arlnu.komuchi;
-				PRODUCT_NAME = komuchi;
-				SWIFT_OBJC_BRIDGING_HEADER = "komuchi/komuchi-Bridging-Header.h";
+				PRODUCT_BUNDLE_IDENTIFIER = com.arlnu.twin;
+				PRODUCT_NAME = twin;
+				SWIFT_OBJC_BRIDGING_HEADER = "twin/twin-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
@@ -367,13 +367,13 @@
 		};
 		13B07F951A680F5B00A75B9A /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 47B5AE1A152E3CCF534C75C3 /* Pods-komuchi.release.xcconfig */;
+			baseConfigurationReference = 47B5AE1A152E3CCF534C75C3 /* Pods-twin.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
-				CODE_SIGN_ENTITLEMENTS = komuchi/komuchi.entitlements;
+				CODE_SIGN_ENTITLEMENTS = twin/twin.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
-				INFOPLIST_FILE = komuchi/Info.plist;
+				INFOPLIST_FILE = twin/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -386,9 +386,9 @@
 					"-lc++",
 				);
 				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
-				PRODUCT_BUNDLE_IDENTIFIER = com.arlnu.komuchi;
-				PRODUCT_NAME = komuchi;
-				SWIFT_OBJC_BRIDGING_HEADER = "komuchi/komuchi-Bridging-Header.h";
+				PRODUCT_BUNDLE_IDENTIFIER = com.arlnu.twin;
+				PRODUCT_NAME = twin;
+				SWIFT_OBJC_BRIDGING_HEADER = "twin/twin-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = 1;
 				VERSIONING_SYSTEM = "apple-generic";
@@ -516,7 +516,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "komuchi" */ = {
+		13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "twin" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				13B07F941A680F5B00A75B9A /* Debug */,
@@ -525,7 +525,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		83CBB9FA1A601CBA00E9B192 /* Build configuration list for PBXProject "komuchi" */ = {
+		83CBB9FA1A601CBA00E9B192 /* Build configuration list for PBXProject "twin" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				83CBBA201A601CBA00E9B192 /* Debug */,

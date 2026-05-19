@@ -1,4 +1,3 @@
-/* global setTimeout, clearTimeout, console, process, __DEV__ */
 /**
  * RecordingContext
  *
@@ -33,8 +32,9 @@ import {
   retryTranscription,
   getMe,
   ApiClientError,
-} from '@komuchi/shared';
+} from '@twin/shared';
 import { useAuth } from './AuthContext';
+import { getExpoPublicEnv } from '../lib/expoPublicEnv';
 
 const MIC_EXPLAINED_KEY = 'twin_mic_permission_explained';
 const STALE_RECORDING_KEY = 'twin:stale_recording';
@@ -428,8 +428,13 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
             directUploadHeaders['x-user-id'] = userId;
           }
 
+          const apiBaseUrl = getExpoPublicEnv(
+            'EXPO_PUBLIC_API_BASE_URL',
+            'https://twin-production-a0e4.up.railway.app'
+          );
+
           const direct = await FileSystem.uploadAsync(
-            `${process.env.EXPO_PUBLIC_API_BASE_URL}/api/recordings/${createResult.recordingId}/upload`,
+            `${apiBaseUrl}/api/recordings/${createResult.recordingId}/upload`,
             fileUri,
             {
               httpMethod: 'POST',

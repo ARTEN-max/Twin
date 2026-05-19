@@ -69,7 +69,7 @@ describe('API Integration Tests', () => {
       });
 
       expect(createResponse.statusCode).toBe(201);
-      const { recordingId, uploadUrl, objectKey } = JSON.parse(createResponse.body).data;
+      const { recordingId, objectKey } = JSON.parse(createResponse.body).data;
 
       // Step 2: Mock S3 upload (simulate file upload)
       mockS3StoragePut(objectKey, {

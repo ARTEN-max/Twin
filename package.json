@@ -1,10 +1,14 @@
 {
-  "name": "komuchi",
+  "name": "twin",
   "version": "0.0.1",
   "private": true,
   "packageManager": "pnpm@9.15.0",
   "scripts": {
     "dev": "turbo dev",
+    "dev:api": "pnpm --filter=@twin/api dev",
+    "dev:worker": "pnpm --filter=@twin/api dev:worker",
+    "dev:metro": "cd apps/mobile && EXPO_PUBLIC_API_BASE_URL=http://localhost:3001 npx expo start --dev-client",
+    "build:shared": "pnpm --filter=@twin/shared build",
     "build": "turbo build",
     "lint": "turbo lint",
     "lint:fix": "turbo lint:fix",
@@ -16,6 +20,8 @@
     "test:coverage": "turbo test:coverage",
     "clean": "turbo clean && rm -rf node_modules",
     "prepare": "husky",
+    "pods:install": "cd ios && pod install",
+    "xcode:open": "open ios/twin.xcworkspace",
     "android": "expo run:android",
     "ios": "expo run:ios"
   },

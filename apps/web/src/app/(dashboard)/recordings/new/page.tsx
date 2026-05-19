@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useDropzone } from 'react-dropzone';
 import { Upload, FileAudio, X, Loader2, CheckCircle } from 'lucide-react';
 import { useUploadRecording } from '@/hooks/use-recordings';
-import { cn } from '@komuchi/ui';
+import { cn } from '@twin/ui';
 
 const MODES = [
   { value: 'general', label: 'General', description: 'General conversation or discussion' },

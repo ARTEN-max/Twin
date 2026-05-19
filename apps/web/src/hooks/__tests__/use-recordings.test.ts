@@ -33,7 +33,7 @@ describe('useRecordings', () => {
       ],
       pagination: { page: 1, limit: 20, total: 2, totalPages: 1 },
       success: true,
-    };
+    } as Awaited<ReturnType<typeof api.getRecordings>>;
 
     vi.mocked(api.getRecordings).mockResolvedValue(mockRecordings);
 

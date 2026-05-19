@@ -1,4 +1,3 @@
-/* global setTimeout, clearTimeout */
 /**
  * RecordingDetailScreen
  *
@@ -26,7 +25,7 @@ import {
   type RecordingDetail,
   ApiClientError,
   deleteRecordingApi,
-} from '@komuchi/shared';
+} from '@twin/shared';
 import { useAuth } from '../contexts/AuthContext';
 import { theme } from '../theme';
 

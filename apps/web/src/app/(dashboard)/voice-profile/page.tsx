@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Mic, Square, Loader2, CheckCircle, AlertCircle, Trash2, UserCircle } from 'lucide-react';
-import { cn } from '@komuchi/ui';
+import { cn } from '@twin/ui';
 import { formatTimer, useMediaRecorder } from '@/hooks/use-media-recorder';
 import { useUserId } from '@/lib/auth';
 
@@ -96,7 +96,7 @@ export default function VoiceProfilePage() {
             const errorText = await response.text();
             errorMessage = errorText || errorMessage;
           }
-        } catch (parseError) {
+        } catch (_parseError) {
           // If parsing fails, use status text
           errorMessage = response.statusText || errorMessage;
         }

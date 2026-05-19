@@ -1,5 +1,5 @@
 # =========================================
-# Komuchi Web App Dockerfile
+# Twin Web App Dockerfile
 # =========================================
 # Build context must be the monorepo root:
 #   docker build -f apps/web/Dockerfile .
@@ -32,14 +32,14 @@ COPY packages/ui ./packages/ui
 COPY apps/web ./apps/web
 
 # Build workspace packages first, then the web app
-RUN pnpm --filter=@komuchi/shared build
-RUN pnpm --filter=@komuchi/ui build
+RUN pnpm --filter=@twin/shared build
+RUN pnpm --filter=@twin/ui build
 
 # Set API_URL for the Next.js build so rewrites point to the Docker service name.
 # This gets baked into .next/routes-manifest.json during `next build`.
 ARG API_URL=http://api:3001
 ENV API_URL=$API_URL
-RUN pnpm --filter=@komuchi/web build
+RUN pnpm --filter=@twin/web build
 
 # ---- Runtime ----
 FROM base AS runtime
@@ -63,4 +63,4 @@ COPY --from=build /app/packages/ui/package.json ./packages/ui/
 
 EXPOSE 3000
 
-CMD ["pnpm", "--filter=@komuchi/web", "start"]
+CMD ["pnpm", "--filter=@twin/web", "start"]

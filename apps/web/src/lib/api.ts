@@ -1,5 +1,5 @@
 /**
- * API Client for Komuchi Backend
+ * API Client for Twin Backend
  */
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';

@@ -10,7 +10,7 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variantStyles = {
   primary:
-    'bg-komuchi-600 text-white hover:bg-komuchi-700 focus:ring-komuchi-500 dark:bg-komuchi-500 dark:hover:bg-komuchi-600',
+    'bg-twin-600 text-white hover:bg-twin-700 focus:ring-twin-500 dark:bg-twin-500 dark:hover:bg-twin-600',
   secondary:
     'bg-gray-100 text-gray-900 hover:bg-gray-200 focus:ring-gray-500 dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700',
   ghost:

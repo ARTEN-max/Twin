@@ -27,7 +27,7 @@ import {
 } from '@/hooks/use-recordings';
 import { getDownloadUrl } from '@/lib/api';
 import { useUserId } from '@/lib/auth';
-import { cn } from '@komuchi/ui';
+import { cn } from '@twin/ui';
 
 type Tab = 'debrief' | 'transcript' | 'chat';
 

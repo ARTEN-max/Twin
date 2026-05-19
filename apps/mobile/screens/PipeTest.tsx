@@ -1,6 +1,6 @@
 /**
  * PipeTest Screen
- * 
+ *
  * End-to-end test of the recording upload flow:
  * 1. Record 5 seconds of audio
  * 2. Upload to presigned URL
@@ -10,18 +10,9 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  Button,
-  ScrollView,
-  ActivityIndicator,
-  Alert,
-} from 'react-native';
+import { View, Text, StyleSheet, Button, ScrollView, ActivityIndicator, Alert } from 'react-native';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
-import Constants from 'expo-constants';
 import {
   createRecording,
   uploadRecordingFile,
@@ -29,8 +20,9 @@ import {
   getRecordingStatus,
   getRecordingResult,
   ApiClientError,
-} from '@komuchi/shared';
+} from '@twin/shared';
 import { useAuth } from '../contexts/AuthContext';
+import { getExpoPublicEnv } from '../lib/expoPublicEnv';
 
 type Status =
   | 'idle'
@@ -47,10 +39,11 @@ type Status =
 export default function PipeTestScreen() {
   const { user } = useAuth();
   const MOCK_USER_ID = user?.uid ?? 'anonymous';
+  const apiBaseUrl = getExpoPublicEnv('EXPO_PUBLIC_API_BASE_URL', 'http://172.20.10.10:3001');
   const [status, setStatus] = useState<Status>('idle');
   const [error, setError] = useState<string | null>(null);
-  const [recording, setRecording] = useState<Audio.Recording | null>(null);
-  const [recordingUri, setRecordingUri] = useState<string | null>(null);
+  const [, setRecording] = useState<Audio.Recording | null>(null);
+  const [, setRecordingUri] = useState<string | null>(null);
   const [recordingId, setRecordingId] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<any>(null);
   const [debrief, setDebrief] = useState<any>(null);
@@ -60,18 +53,17 @@ export default function PipeTestScreen() {
   useEffect(() => {
     const testConnection = async () => {
       try {
-        const apiUrl = typeof process !== 'undefined' ? process.env?.EXPO_PUBLIC_API_BASE_URL : 'http://172.20.10.10:3001';
-        console.log('Testing API connection to:', apiUrl);
-        const response = await fetch(`${apiUrl}/api/health`);
+        console.log('Testing API connection to:', apiBaseUrl);
+        const response = await fetch(`${apiBaseUrl}/api/health`);
         const data = await response.json();
         console.log('API health check:', data);
       } catch (err) {
         console.error('API health check failed:', err);
-        setError(`Cannot reach API server. Check that API is running at ${typeof process !== 'undefined' ? process.env?.EXPO_PUBLIC_API_BASE_URL : 'http://172.20.10.10:3001'}`);
+        setError(`Cannot reach API server. Check that API is running at ${apiBaseUrl}`);
       }
     };
     testConnection();
-  }, []);
+  }, [apiBaseUrl]);
 
   const reset = () => {
     setStatus('idle');
@@ -88,10 +80,7 @@ export default function PipeTestScreen() {
     try {
       const { status } = await Audio.requestPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert(
-          'Permission Required',
-          'Microphone permission is required to record audio.'
-        );
+        Alert.alert('Permission Required', 'Microphone permission is required to record audio.');
         return false;
       }
       return true;
@@ -179,9 +168,14 @@ export default function PipeTestScreen() {
         mimeType = 'audio/m4a';
       }
 
-      console.log('Calling createRecording with:', { userId: MOCK_USER_ID, title: 'PipeTest Recording', mode: 'general', mimeType });
-      console.log('API Base URL from env:', typeof process !== 'undefined' ? process.env?.EXPO_PUBLIC_API_BASE_URL : 'not available');
-      
+      console.log('Calling createRecording with:', {
+        userId: MOCK_USER_ID,
+        title: 'PipeTest Recording',
+        mode: 'general',
+        mimeType,
+      });
+      console.log('API Base URL from env:', apiBaseUrl);
+
       let createResult;
       try {
         createResult = await createRecording(MOCK_USER_ID, {
@@ -192,7 +186,9 @@ export default function PipeTestScreen() {
         console.log('createRecording result:', createResult);
       } catch (createError) {
         console.error('createRecording failed:', createError);
-        throw new Error(`Failed to create recording: ${createError instanceof Error ? createError.message : String(createError)}`);
+        throw new Error(
+          `Failed to create recording: ${createError instanceof Error ? createError.message : String(createError)}`
+        );
       }
 
       setRecordingId(createResult.recordingId);
@@ -218,7 +214,7 @@ export default function PipeTestScreen() {
       // This works even if MinIO isn't accessible from the simulator
       setStatus('uploading');
       setStatusMessage('Uploading file via API...');
-      
+
       try {
         console.log('Uploading via direct API endpoint');
         console.log('Upload details:', {
@@ -226,26 +222,24 @@ export default function PipeTestScreen() {
           fileSize: bytes.length,
           mimeType,
         });
-        await uploadRecordingFile(
-          MOCK_USER_ID,
-          createResult.recordingId,
-          bytes.buffer,
-          mimeType
-        );
+        await uploadRecordingFile(MOCK_USER_ID, createResult.recordingId, bytes.buffer, mimeType);
         setStatusMessage('Upload complete, starting processing...');
         // Direct upload endpoint automatically calls completeUpload internally
         // So we can skip to polling
       } catch (directUploadError) {
         console.error('Direct upload failed:', directUploadError);
         console.error('Direct upload error details:', {
-          message: directUploadError instanceof Error ? directUploadError.message : String(directUploadError),
+          message:
+            directUploadError instanceof Error
+              ? directUploadError.message
+              : String(directUploadError),
           name: directUploadError instanceof Error ? directUploadError.name : 'Unknown',
         });
         console.log('Trying presigned URL fallback...');
-        
+
         // Fallback to presigned URL (if MinIO is accessible from simulator)
         const headers: Record<string, string> = {};
-        
+
         // Use requiredHeaders if provided, otherwise set Content-Type
         if (createResult.requiredHeaders) {
           Object.assign(headers, createResult.requiredHeaders);
@@ -260,7 +254,7 @@ export default function PipeTestScreen() {
         console.log('Uploading to presigned URL:', createResult.uploadUrl);
         console.log('Upload headers:', headers);
         console.log('Upload body size:', bytes.length, 'bytes');
-        
+
         const uploadResponse = await fetch(createResult.uploadUrl, {
           method: 'PUT',
           body: bytes.buffer,
@@ -273,7 +267,7 @@ export default function PipeTestScreen() {
             `Upload failed: ${uploadResponse.status} ${uploadResponse.statusText}\n${errorText}`
           );
         }
-        
+
         setStatusMessage('Upload complete');
 
         // Step 4: Complete upload (only needed for presigned URL flow)
@@ -283,7 +277,7 @@ export default function PipeTestScreen() {
         await completeUpload(MOCK_USER_ID, createResult.recordingId, {
           fileSize: bytes.length,
         });
-        
+
         setStatusMessage('Upload completed, starting processing...');
       }
 
@@ -302,7 +296,9 @@ export default function PipeTestScreen() {
         setError(`API Error: ${err.message} (${err.statusCode})`);
       } else {
         const errorMessage = err instanceof Error ? err.message : 'Upload flow failed';
-        setError(`${errorMessage}${err instanceof TypeError && err.message.includes('Network') ? ' - Check API server and network connectivity' : ''}`);
+        setError(
+          `${errorMessage}${err instanceof TypeError && err.message.includes('Network') ? ' - Check API server and network connectivity' : ''}`
+        );
       }
       setStatus('error');
     }
@@ -319,10 +315,8 @@ export default function PipeTestScreen() {
     while (attempts < maxAttempts) {
       try {
         const statusResult = await getRecordingStatus(MOCK_USER_ID, id);
-        
-        setStatusMessage(
-          `Status: ${statusResult.status} (attempt ${attempts + 1}/${maxAttempts})`
-        );
+
+        setStatusMessage(`Status: ${statusResult.status} (attempt ${attempts + 1}/${maxAttempts})`);
 
         if (statusResult.status === 'complete') {
           // Fetch full result with transcript and debrief
@@ -366,9 +360,7 @@ export default function PipeTestScreen() {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Status</Text>
         <Text style={styles.statusText}>{status}</Text>
-        {statusMessage ? (
-          <Text style={styles.statusMessage}>{statusMessage}</Text>
-        ) : null}
+        {statusMessage ? <Text style={styles.statusMessage}>{statusMessage}</Text> : null}
         {status === 'recording' || status === 'polling' ? (
           <ActivityIndicator size="small" style={styles.spinner} />
         ) : null}
@@ -437,12 +429,8 @@ export default function PipeTestScreen() {
           onPress={startRecording}
           disabled={status !== 'idle' && status !== 'error' && status !== 'complete'}
         />
-        {(status === 'error' || status === 'complete') && (
-          <View style={styles.buttonSpacer} />
-        )}
-        {(status === 'error' || status === 'complete') && (
-          <Button title="Reset" onPress={reset} />
-        )}
+        {(status === 'error' || status === 'complete') && <View style={styles.buttonSpacer} />}
+        {(status === 'error' || status === 'complete') && <Button title="Reset" onPress={reset} />}
       </View>
     </ScrollView>
   );

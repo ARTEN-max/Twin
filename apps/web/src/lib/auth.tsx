@@ -1,12 +1,6 @@
 'use client';
 
-import {
-  createContext,
-  useContext,
-  useState,
-  useEffect,
-  type ReactNode,
-} from 'react';
+import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
 
 // ============================================
 // Types
@@ -33,10 +27,10 @@ const AuthContext = createContext<AuthContextType | null>(null);
 // Default demo user (matches seeded database user)
 const DEMO_USER: User = {
   id: '91b4d85d-1b51-4a7b-8470-818b75979913',
-  email: 'demo@komuchi.dev',
+  email: 'demo@twin.dev',
 };
 
-const STORAGE_KEY = 'komuchi-auth';
+const STORAGE_KEY = 'twin-auth';
 
 // ============================================
 // Auth Provider

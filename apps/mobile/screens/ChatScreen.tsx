@@ -1,4 +1,3 @@
-/* global setInterval, clearInterval, setTimeout, __DEV__, console */
 /**
  * ChatScreen
  *
@@ -34,11 +33,11 @@ import {
   sendChatMessage,
   ApiClientError,
   type ChatMessage,
-} from '@komuchi/shared';
+} from '@twin/shared';
 import { useAuth } from '../contexts/AuthContext';
 import { theme } from '../theme';
 
-const STORAGE_BASE = `${FileSystem.documentDirectory}komuchi_chat/`;
+const STORAGE_BASE = `${FileSystem.documentDirectory}twin_chat/`;
 const CHAT_DATE_KEY = 'twin:chat_date';
 
 function todayString(): string {

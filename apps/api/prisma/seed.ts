@@ -16,7 +16,7 @@ async function main() {
   const demoUser = await prisma.user.create({
     data: {
       id: '91b4d85d-1b51-4a7b-8470-818b75979913',
-      email: 'demo@komuchi.dev',
+      email: 'demo@twin.dev',
     },
   });
   console.log(`✅ Created demo user: ${demoUser.email} (ID: ${demoUser.id})`);
@@ -189,7 +189,7 @@ Team standup covering progress updates from John, Sarah, and Mike.
 
 Of course, we've been looking forward to learning more about your solution.
 
-Great! Let me walk you through how Komuchi can transform your team's meeting workflows. We specialize in audio transcription and intelligent debriefing.
+Great! Let me walk you through how Twin can transform your team's meeting workflows. We specialize in audio transcription and intelligent debriefing.
 
 That sounds interesting. Our biggest pain point is keeping track of action items from calls.
 
@@ -218,7 +218,7 @@ Perfect. We can set you up with a 30-day trial for your sales team. I'll send ov
         {
           start: 16,
           end: 35,
-          text: "Great! Let me walk you through how Komuchi can transform your team's meeting workflows. We specialize in audio transcription and intelligent debriefing.",
+          text: "Great! Let me walk you through how Twin can transform your team's meeting workflows. We specialize in audio transcription and intelligent debriefing.",
           speaker: 'Sales Rep',
         },
         {

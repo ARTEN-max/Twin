@@ -14,10 +14,8 @@ import {
   ActivityIndicator,
   Alert,
   ScrollView,
-  Linking,
 } from 'react-native';
 import { useConsent } from '../contexts/ConsentContext';
-
 
 interface DataConsentScreenProps {
   onBack: () => void;
@@ -25,14 +23,12 @@ interface DataConsentScreenProps {
   onTermsOfService?: () => void;
 }
 
-export default function DataConsentScreen({ onBack, onPrivacyPolicy, onTermsOfService }: DataConsentScreenProps) {
-  const {
-    hasConsent,
-    consentAcceptedAt,
-    consentRevokedAt,
-    accept,
-    revoke,
-  } = useConsent();
+export default function DataConsentScreen({
+  onBack,
+  onPrivacyPolicy,
+  onTermsOfService,
+}: DataConsentScreenProps) {
+  const { hasConsent, consentAcceptedAt, consentRevokedAt, accept, revoke } = useConsent();
 
   const [loading, setLoading] = useState(false);
 
@@ -77,7 +73,7 @@ export default function DataConsentScreen({ onBack, onPrivacyPolicy, onTermsOfSe
             }
           },
         },
-      ],
+      ]
     );
   };
 
@@ -114,14 +110,9 @@ export default function DataConsentScreen({ onBack, onPrivacyPolicy, onTermsOfSe
 
           <View style={styles.statusRow}>
             <View
-              style={[
-                styles.statusBadge,
-                hasConsent ? styles.statusActive : styles.statusRevoked,
-              ]}
+              style={[styles.statusBadge, hasConsent ? styles.statusActive : styles.statusRevoked]}
             >
-              <Text style={styles.statusText}>
-                {hasConsent ? 'Active' : 'Revoked'}
-              </Text>
+              <Text style={styles.statusText}>{hasConsent ? 'Active' : 'Revoked'}</Text>
             </View>
           </View>
 
@@ -143,8 +134,8 @@ export default function DataConsentScreen({ onBack, onPrivacyPolicy, onTermsOfSe
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Withdraw Consent</Text>
             <Text style={styles.explainer}>
-              If you withdraw consent, Twin will stop accepting new recordings
-              and audio uploads. You can re-enable consent at any time.
+              If you withdraw consent, Twin will stop accepting new recordings and audio uploads.
+              You can re-enable consent at any time.
             </Text>
             <TouchableOpacity
               style={styles.dangerButton}
@@ -165,8 +156,7 @@ export default function DataConsentScreen({ onBack, onPrivacyPolicy, onTermsOfSe
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Re-enable Consent</Text>
             <Text style={styles.explainer}>
-              Processing requires consent. Check all boxes below to re-enable
-              recording and uploads.
+              Processing requires consent. Check all boxes below to re-enable recording and uploads.
             </Text>
 
             <TouchableOpacity
@@ -191,8 +181,8 @@ export default function DataConsentScreen({ onBack, onPrivacyPolicy, onTermsOfSe
                 {check2 && <Text style={styles.checkmark}>✓</Text>}
               </View>
               <Text style={styles.checkLabel}>
-                I understand my audio may be uploaded and processed to generate
-                transcripts and insights.
+                I understand my audio may be uploaded and processed to generate transcripts and
+                insights.
               </Text>
             </TouchableOpacity>
 
@@ -205,8 +195,8 @@ export default function DataConsentScreen({ onBack, onPrivacyPolicy, onTermsOfSe
                 {check3 && <Text style={styles.checkmark}>✓</Text>}
               </View>
               <Text style={styles.checkLabel}>
-                I understand third-party processors may handle this data as
-                described in the Privacy Policy.
+                I understand third-party processors may handle this data as described in the Privacy
+                Policy.
               </Text>
             </TouchableOpacity>
 
@@ -219,9 +209,7 @@ export default function DataConsentScreen({ onBack, onPrivacyPolicy, onTermsOfSe
               {loading ? (
                 <ActivityIndicator color="#000" />
               ) : (
-                <Text
-                  style={[styles.ctaText, !allChecked && styles.ctaTextDisabled]}
-                >
+                <Text style={[styles.ctaText, !allChecked && styles.ctaTextDisabled]}>
                   Re-enable Consent
                 </Text>
               )}

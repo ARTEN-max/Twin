@@ -1,5 +1,4 @@
-import { afterAll, afterEach, beforeAll, beforeEach } from 'vitest';
-import Fastify, { type FastifyInstance } from 'fastify';
+import { type FastifyInstance } from 'fastify';
 import { PrismaClient } from '@prisma/client';
 import { buildApp } from '../../app.js';
 
@@ -25,11 +24,11 @@ export async function setupTestDatabase(): Promise<PrismaClient> {
   });
 
   await testDb.$connect();
-  
+
   // Run migrations using Prisma db push
   const { execSync } = await import('child_process');
   try {
-    execSync('pnpm --filter=@komuchi/api db:push --accept-data-loss', {
+    execSync('pnpm --filter=@twin/api db:push --accept-data-loss', {
       env: { ...process.env, DATABASE_URL: testDbUrl },
       stdio: 'ignore',
     });
@@ -110,9 +109,7 @@ export interface TestUser {
   email: string;
 }
 
-export async function createTestUser(
-  overrides?: Partial<TestUser>
-): Promise<TestUser> {
+export async function createTestUser(overrides?: Partial<TestUser>): Promise<TestUser> {
   const db = getTestDb();
   const user = await db.user.create({
     data: {
@@ -245,9 +242,7 @@ export async function createTestDebrief(
     data: {
       recordingId,
       markdown: overrides?.markdown || '# Test Debrief\n\nTest content',
-      sections: overrides?.sections || [
-        { title: 'Summary', content: 'Test summary', order: 0 },
-      ],
+      sections: overrides?.sections || [{ title: 'Summary', content: 'Test summary', order: 0 }],
     },
   });
 }

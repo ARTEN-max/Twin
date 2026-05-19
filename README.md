@@ -1,696 +1,222 @@
-# TWIN
+# Twin
 
-> Audio upload → Transcript → Debrief card
+This repo contains the Twin iOS app, local API, worker, and supporting services. This is the only setup guide you need if you want to run the app locally in Xcode.
 
-A production-grade monorepo for building audio transcription and debrief generation.
+## Prerequisites
 
-## Tech Stack
+- macOS
+- Xcode 16+ with iOS Simulator installed
+- Node.js 20+
+- `pnpm` 9+
+- CocoaPods
+- Docker Desktop
 
-- **Monorepo**: Turborepo + pnpm workspaces
-- **Web App**: Next.js 14 (App Router) + TypeScript + Tailwind CSS
-- **Mobile App**: React Native (Expo) + TypeScript
-- **API**: Fastify + TypeScript + Prisma
-- **Auth**: Firebase Authentication (email/password)
-- **Database**: SQLite (via Prisma)
-- **Storage**: S3-compatible (AWS S3, Cloudflare R2, MinIO)
-- **Queue**: BullMQ + Redis
-- **AI**: OpenAI (GPT-4o), Deepgram, mock providers for local dev
-- **Diarization**: Python service (Coqui TTS / WhoSpeaks)
-- **Shared**: Zod schemas + TypeScript types
-- **UI**: React component library
-- **Observability**: OpenTelemetry, Sentry, Pino logging
-
-## Project Structure
-
-```
-komuchi/
-├── apps/
-│   ├── web/                 # Next.js 14 frontend
-│   │   ├── src/
-│   │   │   └── app/         # App Router pages
-│   │   └── package.json
-│   ├── api/                 # Fastify backend
-│   │   ├── prisma/
-│   │   │   ├── schema.prisma # Database schema (SQLite)
-│   │   │   └── seed.ts       # Seed data
-│   │   ├── src/
-│   │   │   ├── lib/          # Database, S3, Redis, AI
-│   │   │   ├── queues/       # BullMQ queues & workers
-│   │   │   ├── routes/       # API routes
-│   │   │   ├── services/     # Business logic
-│   │   │   ├── server.ts     # API server entry
-│   │   │   └── worker.ts     # Worker process entry
-│   │   └── package.json
-├── packages/
-│   ├── shared/              # Shared schemas & types
-│   │   └── src/
-│   │       ├── schemas/     # Zod schemas
-│   │       └── types/       # TypeScript types
-│   └── ui/                  # Component library
-│       └── src/
-│           ├── components/  # React components
-│           └── utils/       # Utilities (cn, etc.)
-├── services/
-│   └── diarization/         # Python speaker diarization service
-│       ├── main.py
-│       ├── Dockerfile
-│       └── requirements.txt
-├── docker-compose.yml       # Full-stack Docker setup
-├── turbo.json               # Turborepo config
-├── pnpm-workspace.yaml      # Workspace config
-└── package.json             # Root package.json
-```
-
-## Quick Start
-
-> **New to the project?** Check out [QUICKSTART.md](./QUICKSTART.md) for a step-by-step guide!
-
-### Quick Start with Docker
-
-The fastest way to get the full stack running. No need to install Node.js, Redis, or configure S3 — Docker handles everything.
-
-### Prerequisites
-
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running
-
-### Steps
+Verify the basics:
 
 ```bash
-# 1. Clone the repo
-git clone <repo-url>
-cd Debrief
-
-# 2. Copy the environment template (defaults work out of the box)
-cp apps/api/.env.example apps/api/.env
-
-# 3. Build and start all services
-docker compose up --build
+node -v
+pnpm -v
+pod --version
+docker --version
 ```
 
-This starts six services:
+## 1. Install Dependencies
 
-| Service         | URL                   | Description                                                |
-| --------------- | --------------------- | ---------------------------------------------------------- |
-| **Web App**     | http://localhost:3000 | Next.js frontend                                           |
-| **API**         | http://localhost:3001 | Fastify backend                                            |
-| **Worker**      | _(background)_        | BullMQ job processor                                       |
-| **Redis**       | localhost:6379        | Job queue                                                  |
-| **MinIO**       | http://localhost:9001 | S3-compatible storage (login: `minioadmin` / `minioadmin`) |
-| **Diarization** | http://localhost:8001 | Python FastAPI service for speaker identification          |
-
-Database migrations run automatically on startup. The app uses mock AI providers by default so you don't need any API keys to get started.
-
-**Note**: The diarization service will download a ~2GB model on first run (takes 2-5 minutes depending on your internet speed). This is cached in a Docker volume for future runs.
-
-### Stopping
+From the repo root:
 
 ```bash
-docker compose down          # Stop containers (data preserved in volumes)
-docker compose down -v       # Stop and remove all data
-```
-
-### Rebuilding after code changes
-
-```bash
-docker compose up --build
-```
-
-### Hybrid mode (for active development)
-
-Run infrastructure in Docker but apps locally for hot reloading:
-
-```bash
-# Start only Redis + MinIO
-docker compose up redis minio minio-init
-
-# In another terminal, run apps locally
 pnpm install
-pnpm dev
 ```
 
----
+## 2. Create Local API Config
 
-## Firebase Authentication Setup
+Create `apps/api/.env` with a local SQLite database and local service endpoints:
 
-The app uses **Firebase Authentication** (email/password) for user accounts. Both the mobile app and the API backend require Firebase configuration.
+```bash
+cat > apps/api/.env <<'EOF'
+NODE_ENV=development
+API_PORT=3001
+API_HOST=0.0.0.0
+CORS_ORIGIN=http://localhost:3000,http://localhost:5174
 
-### 1. Create a Firebase Project
+DATABASE_URL="file:./dev.db"
+REDIS_URL="redis://localhost:6379"
 
-1. Go to [Firebase Console](https://console.firebase.google.com/) and create a new project (or use an existing one).
-2. In the project dashboard, click **Authentication** → **Get Started**.
-3. Enable the **Email/Password** sign-in provider.
+S3_BUCKET=twin
+S3_REGION=us-east-1
+S3_ACCESS_KEY_ID=minioadmin
+S3_SECRET_ACCESS_KEY=minioadmin
+S3_ENDPOINT=http://localhost:9000
 
-### 2. Get Client SDK Keys (for Mobile App)
+TRANSCRIPTION_PROVIDER=mock
+DEBRIEF_PROVIDER=mock
 
-1. In Firebase Console → **Project Settings** (gear icon) → **General**.
-2. Scroll to **Your apps** and click **Add app** → **Web** (the web config works for React Native too).
-3. Register the app and copy these values:
-   - `apiKey`
-   - `authDomain`
-   - `projectId`
-   - `appId`
-4. Add them to `apps/mobile/.env`:
+MAX_UPLOAD_SIZE_MB=500
+DIARIZATION_SERVICE_URL=http://localhost:8001
+EOF
+```
+
+If you want real AI instead of mock processing, add:
+
+```bash
+OPENAI_API_KEY=your_key_here
+TRANSCRIPTION_PROVIDER=openai
+DEBRIEF_PROVIDER=openai
+```
+
+## 3. Create Mobile Env
+
+The iOS app reads `EXPO_PUBLIC_*` values from Expo config. For local development, create a mobile `.env` from the example:
 
 ```bash
 cp apps/mobile/.env.example apps/mobile/.env
 ```
 
-Then fill in:
+For Simulator use:
 
 ```bash
-EXPO_PUBLIC_FIREBASE_API_KEY=AIzaSy...your-key
-EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=your-project.firebaseapp.com
-EXPO_PUBLIC_FIREBASE_PROJECT_ID=your-project-id
-EXPO_PUBLIC_FIREBASE_APP_ID=1:123456789:web:abcdef
+EXPO_PUBLIC_API_BASE_URL=http://localhost:3001
 ```
 
-### 3. Get Admin SDK Keys (for API Backend)
+If you are missing Firebase values, copy them from `apps/mobile/app.json` or replace them with your own Firebase project values.
 
-1. In Firebase Console → **Project Settings** → **Service accounts**.
-2. Click **Generate new private key** to download a JSON file.
-3. Add the values to `apps/api/.env`:
+## 4. Start Local Services
+
+Start Redis, MinIO, and the diarization service:
 
 ```bash
-FIREBASE_PROJECT_ID=your-project-id
-FIREBASE_SERVICE_ACCOUNT_JSON={"type":"service_account","project_id":"...","private_key":"...","client_email":"..."}
+docker compose up redis minio minio-init diarization
 ```
 
-> **Tip**: Paste the entire JSON on one line, or set `FIREBASE_SERVICE_ACCOUNT_JSON` to the file path of the downloaded JSON.
+Leave that terminal running.
 
-### 4. Test the Auth Flow
-
-1. Start the API server and mobile app (see below).
-2. Open the app in the iOS simulator — you should see the **Sign In** screen.
-3. Tap **Create Account** to register with email/password.
-4. After signing up, the app navigates to the Recordings screen.
-5. Try calling the API without a token to confirm you get a `401`:
+## 5. Build Shared Packages
 
 ```bash
-curl -s http://localhost:3001/api/recordings | jq .
-# → { "error": "Authorization header required" }
+pnpm --filter=@twin/shared build
+pnpm --filter=@twin/ui build
 ```
 
-### 5. Running the Mobile App
+## 6. Prepare the Database
 
 ```bash
-# Install dependencies
-pnpm install
-
-# Build shared packages
-pnpm build --filter=@komuchi/shared --filter=@komuchi/ui
-
-# Start the API (Terminal 1)
-pnpm --filter=@komuchi/api dev
-
-# Start the Worker (Terminal 2)
-pnpm --filter=@komuchi/api dev:worker
-
-# Start the mobile app (Terminal 3)
-cd apps/mobile
-npx expo start
-# Or for iOS simulator directly:
-npx expo run:ios
+pnpm --filter=@twin/api db:push
 ```
 
----
+## 7. Start the API and Worker
 
-## Compliance & Data Controls (App Store Readiness)
-
-Twin includes built-in compliance features required for App Store review of an audio-recording + AI-processing app.
-
-### Consent Gate
-
-Every new user must accept three consent checkboxes **before** they can create recordings:
-
-1. "I have permission to record participants where required."
-2. "I understand my audio may be uploaded and processed to generate transcripts and insights."
-3. "I understand third-party processors may handle this data as described in the Privacy Policy."
-
-The consent screen appears automatically after sign-in if the user has not accepted (or has revoked) consent. Consent status is stored server-side (`consentAcceptedAt`, `consentRevokedAt` on the User model).
-
-**Backend enforcement**: `POST /recordings`, `POST /recordings/:id/complete-upload`, and `POST /recordings/:id/upload` all return `403 { error: "consent_required" }` if consent is missing or revoked.
-
-### Withdraw / Re-enable Consent
-
-Users can withdraw consent at any time via **Settings > Data & Consent**. After withdrawal they cannot create new recordings, but existing data remains accessible. They can re-enable consent by checking all three boxes again.
-
-### Privacy Policy & Terms of Service URLs
-
-Set these environment variables in `apps/mobile/.env`:
+In two separate terminals from the repo root:
 
 ```bash
-EXPO_PUBLIC_PRIVACY_POLICY_URL=https://your-domain.com/privacy
-EXPO_PUBLIC_TERMS_URL=https://your-domain.com/terms
-EXPO_PUBLIC_SUPPORT_EMAIL=support@your-domain.com
+pnpm run dev:api
 ```
-
-These URLs are displayed in the Settings screen and the Consent screen. **You must host actual privacy policy and terms pages before submitting to the App Store.**
-
-### Recording Deletion
-
-Users can delete individual recordings from the recording detail screen. Deletion removes:
-- Recording metadata from the database
-- Audio file from S3/object storage
-- All derived artifacts (transcript, debrief, jobs)
-
-### Account Deletion (Apple requirement)
-
-Users can delete their account from **Settings > Delete Account**. This requires typing "DELETE" to confirm and deletes:
-- All recordings + audio + artifacts
-- User profile and consent data
-- Firebase authentication account
-
-If re-authentication is required (session too old), the app prompts for the password.
-
-### API Endpoints
-
-| Method   | Endpoint                    | Description                              |
-| -------- | --------------------------- | ---------------------------------------- |
-| `GET`    | `/api/me`                   | Get user profile + consent status        |
-| `POST`   | `/api/me/consent/accept`    | Accept consent                           |
-| `POST`   | `/api/me/consent/revoke`    | Revoke consent                           |
-| `DELETE` | `/api/me`                   | Delete account + all data                |
-| `DELETE` | `/api/recordings/:id`       | Delete a single recording                |
-
-### Manual QA Checklist
-
-- [ ] **New user** → sees consent screen → accepts → can record
-- [ ] **New user** → declines consent (leaves unchecked) → cannot proceed to recordings
-- [ ] **Mic permission** → first-time user sees explainer → grants → can record
-- [ ] **Mic denied** → sees "Open Settings" and "Try Again" buttons
-- [ ] **Delete recording** → removed from list → cannot open detail
-- [ ] **Delete account** → requires typing "DELETE" → returns to auth screen → old data inaccessible
-- [ ] **Settings** → shows email, privacy/terms links, sign out, data & consent, delete account
-- [ ] **Withdraw consent** → user cannot create new recordings → API returns 403
-- [ ] **Re-enable consent** → user can create recordings again
-
----
-
-## Manual Setup (without Docker)
-
-### Prerequisites
-
-- Node.js >= 20.0.0 (see `.nvmrc`)
-- pnpm >= 9.0.0
-- Redis >= 7
-- S3-compatible storage (AWS S3, Cloudflare R2, or MinIO)
-- Rust toolchain (for desktop app only)
-
-### 1. Install dependencies
 
 ```bash
-pnpm install
+pnpm run dev:worker
 ```
 
-### 2. Set up Redis
+At this point the backend should be available at `http://localhost:3001`.
 
-**Option A: Docker**
+## 8. Start Metro for the iOS App
+
+Use the local API base URL when starting Expo/Metro:
 
 ```bash
-docker run -p 6379:6379 redis:7-alpine
+pnpm run dev:metro
 ```
 
-**Option B: Upstash (serverless)**
-Create a Redis database at https://upstash.com and get the connection URL.
+Leave that terminal running.
 
-### 3. Set up S3 Storage
+## 9. Open the App in Xcode
 
-**Option A: AWS S3**
-
-1. Create an S3 bucket
-2. Create an IAM user with S3 access
-3. Note the access key, secret, region, and bucket name
-
-**Option B: Cloudflare R2**
-
-1. Create an R2 bucket in Cloudflare dashboard
-2. Create an API token with R2 permissions
-
-**Option C: MinIO (local development)**
+Open the workspace:
 
 ```bash
-docker run -p 9000:9000 -p 9001:9001 \
-  -e "MINIO_ROOT_USER=minioadmin" \
-  -e "MINIO_ROOT_PASSWORD=minioadmin" \
-  minio/minio server /data --console-address ":9001"
+pnpm run xcode:open
 ```
 
-### S3 CORS (required for browser uploads)
+In Xcode:
 
-Because the browser uploads audio **directly** to S3 using a presigned **PUT** URL, your bucket must allow cross-origin `PUT` from your web app origin.
+1. Select the `twin` scheme.
+2. Choose an iPhone simulator.
+3. If signing is required, set your Apple Development Team under `twin` target → Signing & Capabilities.
+4. Press Run.
 
-- **Important**: The upload request must include a `Content-Type` header that matches the `mimeType` you sent to `POST /api/recordings` (the presigned URL enforces it).
-
-**AWS S3 bucket CORS example**
-
-Use this for development (localhost) and production (replace with your deployed web origin):
-
-```json
-[
-  {
-    "AllowedOrigins": ["http://localhost:3000", "https://your-web-domain.com"],
-    "AllowedMethods": ["PUT", "GET", "HEAD"],
-    "AllowedHeaders": ["*"],
-    "ExposeHeaders": ["ETag"],
-    "MaxAgeSeconds": 3000
-  }
-]
-```
-
-**S3-compatible storage (R2/MinIO)**
-
-Configure CORS on your bucket/service with the same intent:
-
-- Allow origins: your dev/prod web origins
-- Allow methods: `PUT`, `GET`, `HEAD`
-- Allow headers: `Content-Type` (or `*`)
-- Expose headers: `ETag` (optional, but useful)
-
-### 4. Set up environment variables
-
-Copy the template and edit as needed:
+If CocoaPods ever gets out of sync again, rerun:
 
 ```bash
-cp apps/api/.env.example apps/api/.env
+pnpm run pods:install
 ```
 
-The `.env.example` file contains all required variables with sensible defaults. For local development with Docker, you can use it as-is (it's configured for MinIO and mock AI providers).
+## 10. First Local Run Checklist
 
-Key variables to configure:
+Before expecting the app to work end to end, make sure:
+
+- Docker services are still running
+- API server is running on port `3001`
+- Worker is running
+- Metro is running with `EXPO_PUBLIC_API_BASE_URL=http://localhost:3001`
+- Xcode is opening `ios/twin.xcworkspace`, not the `.xcodeproj`
+
+## Common Local Issues
+
+`App still talks to production API`
+
+- Stop Metro and restart it with:
 
 ```bash
-# Database (SQLite — works out of the box, no external DB needed)
-DATABASE_URL="file:./dev.db"
-
-# API Configuration
-API_PORT=3001
-API_HOST=0.0.0.0
-CORS_ORIGIN=http://localhost:3000,http://localhost:5174
-NODE_ENV=development
-
-# Redis (for BullMQ job queue)
-REDIS_URL="redis://localhost:6379"
-
-# S3-compatible Storage
-S3_BUCKET=komuchi-audio
-S3_REGION=us-east-1
-S3_ACCESS_KEY_ID=your-access-key
-S3_SECRET_ACCESS_KEY=your-secret-key
-# S3_ENDPOINT=http://localhost:9000  # For MinIO/R2
-
-# AI Providers (defaults to "mock" — no API keys needed to get started)
-TRANSCRIPTION_PROVIDER=mock    # Options: mock, openai, deepgram, whisper-local
-DEBRIEF_PROVIDER=mock          # Options: mock, openai
-# OPENAI_API_KEY=sk-your-key   # Required if using openai provider
-# DEEPGRAM_API_KEY=your-key    # Required if using deepgram provider
-
-# Rate Limiting
-RATE_LIMIT_MAX=100
-RATE_LIMIT_WINDOW_MS=60000
-
-# Upload Limits
-MAX_UPLOAD_SIZE_MB=500
-
-# Optional: enable server-side ffmpeg transcoding for MediaRecorder formats (webm/ogg)
-ENABLE_FFMPEG_TRANSCODE=false
-
-# Diarization Service (optional)
-# DIARIZATION_SERVICE_URL=http://localhost:8001
-
-# Error Tracking (optional)
-# SENTRY_DSN=https://your-dsn@sentry.io/project
-
-# Observability (optional)
-OTEL_ENABLED=false
-# OTEL_SERVICE_NAME=komuchi-api
-# OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+pnpm run dev:metro
 ```
 
-### 5. Set up the database
+`Recordings stay in processing`
+
+- The worker is not running. Start:
 
 ```bash
-pnpm --filter=@komuchi/api db:generate
-pnpm --filter=@komuchi/api db:migrate
-pnpm --filter=@komuchi/api db:seed  # Optional
+pnpm --filter=@twin/api dev:worker
 ```
 
-### 6. Build shared packages
+`Upload fails`
+
+- Check that MinIO is running on `localhost:9000`
+- Check that `S3_ENDPOINT`, `S3_BUCKET`, and MinIO credentials in `apps/api/.env` match the values above
+
+`Voice/profile or diarization features fail`
+
+- Confirm the diarization container is healthy:
 
 ```bash
-pnpm build --filter=@komuchi/shared --filter=@komuchi/ui
+curl http://localhost:8001/health
 ```
 
-### 7. Run development servers
+`Need a clean iOS dependency refresh`
 
 ```bash
-# Terminal 1: API server
-pnpm --filter=@komuchi/api dev
-
-# Terminal 2: Worker process (job queue)
-pnpm --filter=@komuchi/api dev:worker
-
-# Terminal 3: Web app
-pnpm --filter=@komuchi/web dev
+cd ios
+rm -rf Pods Podfile.lock
+pod install
 ```
 
-Or run everything at once:
+## Repo Notes
+
+- `packages/shared/src/` is the source of truth for shared models and API helpers.
+- `packages/shared/dist/` is generated build output. Rebuild it with `pnpm --filter=@twin/shared build` when the shared package changes.
+- The mobile app consumes `@twin/shared` directly from the workspace package, so there is no tracked vendored copy to keep in sync.
+- Use `ios/twin.xcworkspace`, not the `.xcodeproj`.
+- The local quick path in this README is intentionally SQLite + Docker-backed services so a new engineer can boot the app without provisioning separate cloud infrastructure.
+
+## Useful Commands
+
+From the repo root:
 
 ```bash
-pnpm dev  # Runs web + api (start worker separately)
+pnpm --filter=@twin/api typecheck
+pnpm --filter=@twin/web typecheck
+pnpm --filter=@twin/mobile exec tsc --noEmit
 ```
 
----
-
-## Diarization Service
-
-A standalone Python service at `services/diarization/` for speaker identification using Coqui TTS / WhoSpeaks.
-
-### Running with Docker
+To stop local infra:
 
 ```bash
-cd services/diarization
-docker build -t komuchi-diarization .
-docker run -p 8001:8001 komuchi-diarization
+docker compose down
 ```
-
-See `services/diarization/README.md` for more details.
-
----
-
-## Architecture
-
-### Processing Pipeline
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Upload Flow                               │
-├─────────────────────────────────────────────────────────────────┤
-│  Client ──POST /recordings──> API ──presigned URL──> S3         │
-│  Client ──PUT file──────────────────────────────────> S3         │
-│  Client ──POST /complete-upload──> API                          │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      Job Queue (BullMQ)                          │
-├─────────────────────────────────────────────────────────────────┤
-│  transcriptionQueue ──> Worker ──> transcribeAudio()            │
-│       │                    │                                     │
-│       │                    ├── Download from S3                  │
-│       │                    ├── Transcription (OpenAI / Deepgram) │
-│       │                    ├── Save transcript to DB             │
-│       │                    └── Enqueue debrief job               │
-│       │                                                          │
-│       ▼                                                          │
-│  debriefQueue ──────> Worker ──> generateDebrief()              │
-│                           │                                      │
-│                           ├── OpenAI GPT-4o (structured output)  │
-│                           ├── Save debrief to DB                 │
-│                           └── Mark recording complete            │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Job Queue Features
-
-- **Retries**: 3 attempts with exponential backoff (starting at 5s)
-- **Concurrency**: 2 jobs per worker
-- **Rate limiting**: 10 jobs/minute
-- **Status tracking**: Jobs update status in DB at each step
-- **Progress**: Real-time progress updates (10%, 40%, 70%, 100%)
-- **Error handling**: Failed jobs logged with error message
-
-### Production Guardrails
-
-- **Rate Limiting**: Per-user rate limiting with Redis backend (configurable via `RATE_LIMIT_MAX`)
-- **Upload Size**: Configurable max upload size (default 500MB via `MAX_UPLOAD_SIZE_MB`)
-- **Optional Transcoding**: If `ENABLE_FFMPEG_TRANSCODE=true`, the worker will transcode `audio/webm` / `audio/ogg` uploads to WAV (16kHz mono) via ffmpeg before transcription.
-- **Env Validation**: Zod-validated environment configuration with fail-fast startup
-- **Error Tracking**: Sentry integration for production error monitoring
-- **Observability**: OpenTelemetry instrumentation (optional, enable with `OTEL_ENABLED=true`)
-- **Structured Logging**: Pino-based request/response logging with sensitive data redaction
-- **Health Checks**: Kubernetes-ready `/health` (liveness) and `/ready` (readiness) probes
-
-## API Endpoints
-
-### User Profile & Consent
-
-| Method   | Endpoint                 | Description                       |
-| -------- | ------------------------ | --------------------------------- |
-| `GET`    | `/api/me`                | Get profile + consent status      |
-| `POST`   | `/api/me/consent/accept` | Accept consent                    |
-| `POST`   | `/api/me/consent/revoke` | Revoke consent                    |
-| `DELETE` | `/api/me`                | Delete account + all user data    |
-
-### Recordings
-
-| Method   | Endpoint                                  | Description                                |
-| -------- | ----------------------------------------- | ------------------------------------------ |
-| `POST`   | `/api/recordings`                         | Create recording, get presigned upload URL |
-| `POST`   | `/api/recordings/:id/complete-upload`     | Mark upload complete, start processing     |
-| `POST`   | `/api/recordings/:id/upload`              | Proxy upload endpoint                      |
-| `GET`    | `/api/recordings`                         | List user's recordings                     |
-| `GET`    | `/api/recordings/:id`                     | Get recording details                      |
-| `GET`    | `/api/recordings/:id?include=all`         | Get recording with transcript & debrief    |
-| `GET`    | `/api/recordings/:id/download-url`        | Get presigned download URL                 |
-| `GET`    | `/api/recordings/:id/jobs`                | Get processing jobs for recording          |
-| `POST`   | `/api/recordings/:id/retry-debrief`       | Retry failed debrief generation            |
-| `POST`   | `/api/recordings/:id/retry-transcription` | Retry failed transcription                 |
-| `DELETE` | `/api/recordings/:id`                     | Delete recording + audio + artifacts       |
-
-### Voice Profile
-
-| Method   | Endpoint                    | Description                                       |
-| -------- | --------------------------- | ------------------------------------------------- |
-| `POST`   | `/api/voice-profile/enroll` | Enroll a voice profile for speaker identification |
-| `GET`    | `/api/voice-profile/status` | Check voice profile enrollment status             |
-| `DELETE` | `/api/voice-profile`        | Delete voice profile                              |
-
-### Health & Observability
-
-| Method | Endpoint               | Description                                              |
-| ------ | ---------------------- | -------------------------------------------------------- |
-| `GET`  | `/api/health`          | Liveness probe (always returns 200 if server is running) |
-| `GET`  | `/api/ready`           | Readiness probe (checks DB + Redis connections)          |
-| `GET`  | `/api/health/detailed` | Detailed health info (requires token in production)      |
-
-## Available Scripts
-
-### Root Scripts
-
-| Command              | Description                              |
-| -------------------- | ---------------------------------------- |
-| `pnpm dev`           | Start all apps in development mode       |
-| `pnpm build`         | Build all apps and packages              |
-| `pnpm lint`          | Run ESLint across all packages           |
-| `pnpm lint:fix`      | Run ESLint with auto-fix                 |
-| `pnpm format`        | Format all files with Prettier           |
-| `pnpm format:check`  | Check formatting without changes         |
-| `pnpm typecheck`     | Run TypeScript type checking             |
-| `pnpm clean`         | Clean all build outputs and node_modules |
-| `pnpm test`          | Run all tests                            |
-| `pnpm test:coverage` | Run tests with coverage reports          |
-
-### API Scripts
-
-| Command                                      | Description                              |
-| -------------------------------------------- | ---------------------------------------- |
-| `pnpm --filter=@komuchi/api dev`             | Start API server (with hot reload)       |
-| `pnpm --filter=@komuchi/api dev:worker`      | Start job worker (with hot reload)       |
-| `pnpm --filter=@komuchi/api build`           | Generate Prisma client & build with tsup |
-| `pnpm --filter=@komuchi/api start`           | Start production API server              |
-| `pnpm --filter=@komuchi/api start:worker`    | Start production worker                  |
-| `pnpm --filter=@komuchi/api test`            | Run tests                                |
-| `pnpm --filter=@komuchi/api test:watch`      | Run tests in watch mode                  |
-| `pnpm --filter=@komuchi/api test:coverage`   | Run tests with coverage                  |
-| `pnpm --filter=@komuchi/api db:generate`     | Generate Prisma client                   |
-| `pnpm --filter=@komuchi/api db:migrate`      | Run database migrations (dev)            |
-| `pnpm --filter=@komuchi/api db:migrate:prod` | Deploy migrations (production)           |
-| `pnpm --filter=@komuchi/api db:push`         | Push schema changes directly             |
-| `pnpm --filter=@komuchi/api db:seed`         | Seed the database                        |
-| `pnpm --filter=@komuchi/api db:studio`       | Open Prisma Studio GUI                   |
-| `pnpm --filter=@komuchi/api db:reset`        | Reset database (destructive)             |
-
-### Web App Scripts
-
-| Command                            | Description                           |
-| ---------------------------------- | ------------------------------------- |
-| `pnpm --filter=@komuchi/web dev`   | Start Next.js dev server on port 3000 |
-| `pnpm --filter=@komuchi/web build` | Build for production                  |
-| `pnpm --filter=@komuchi/web start` | Start production server               |
-
-## Development URLs
-
-- **Web App**: http://localhost:3000
-- **API**: http://localhost:3001
-- **Health Check**: http://localhost:3001/api/health
-- **Readiness Check**: http://localhost:3001/api/ready
-- **Prisma Studio**: http://localhost:5555
-- **MinIO Console**: http://localhost:9001
-- **Diarization Service**: http://localhost:8001
-
-## Database Schema
-
-```
-┌──────────┐     ┌─────────────┐     ┌────────────┐
-│   User   │────<│  Recording  │────<│    Job     │
-└──────────┘     └─────────────┘     └────────────┘
-                        │
-                        ├───────────────┐
-                        │               │
-                        ▼               ▼
-                 ┌──────────┐    ┌─────────┐
-                 │Transcript│    │ Debrief │
-                 └──────────┘    └─────────┘
-
-Recording Status Flow:
-  pending → uploaded → processing → complete
-                              └───→ failed
-```
-
-The database uses **SQLite** via Prisma. The `DATABASE_URL` defaults to `file:./dev.db` (relative to the Prisma schema directory). No external database server is required.
-
-## Package Dependencies
-
-```
-@komuchi/api
-  ├── @prisma/client         # Database ORM (SQLite)
-  ├── @aws-sdk/client-s3     # S3 storage
-  ├── bullmq + ioredis       # Job queue
-  ├── openai + @deepgram/sdk # AI transcription & debriefs
-  ├── @sentry/node           # Error tracking
-  ├── @opentelemetry/sdk-node # Observability
-  ├── @fastify/rate-limit    # Rate limiting
-  └── @komuchi/shared        # Shared schemas
-
-@komuchi/web
-  ├── @tanstack/react-query  # Data fetching
-  ├── zustand                # State management
-  ├── react-markdown         # Markdown rendering
-  ├── react-dropzone         # File uploads
-  ├── lucide-react           # Icons
-  ├── @komuchi/shared        # Shared schemas
-  └── @komuchi/ui            # Component library
-
-@komuchi/shared
-  └── zod                    # Schema validation
-```
-
-## ffmpeg (optional, recommended for consistent transcription)
-
-If you enable `ENABLE_FFMPEG_TRANSCODE=true`, **ffmpeg must be installed** and available on `PATH` for the **worker** process.
-
-### Install locally (macOS)
-
-```bash
-brew install ffmpeg
-```
-
-### Install locally (Ubuntu/Debian)
-
-```bash
-sudo apt-get update && sudo apt-get install -y ffmpeg
-```
-
-## License
-
-Private - All rights reserved

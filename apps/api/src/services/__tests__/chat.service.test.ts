@@ -11,7 +11,6 @@ import {
   getOrCreateRecordingChatSession,
   addChatMessage,
 } from '../chat.service.js';
-import { getTestDb } from '../../__tests__/helpers/test-utils.js';
 
 describe('Chat Service', () => {
   let testUser: Awaited<ReturnType<typeof createTestUser>>;

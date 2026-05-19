@@ -1,6 +1,6 @@
 /**
- * Komuchi API Server Entry Point
- * 
+ * Twin API Server Entry Point
+ *
  * Initialization order:
  * 1. Load environment variables
  * 2. Initialize OpenTelemetry (must be before other imports for auto-instrumentation)
@@ -20,7 +20,7 @@ import { buildApp } from './app.js';
 import { validateEnv, getEnv } from './lib/env.js';
 
 async function start() {
-  console.log('🔧 Starting Komuchi API server...\n');
+  console.log('🔧 Starting Twin API server...\n');
 
   // Validate environment configuration
   console.log('📋 Validating environment configuration...');
@@ -34,9 +34,9 @@ async function start() {
 
   try {
     await app.listen({ port: env.API_PORT, host: env.API_HOST });
-    
+
     console.log('\n========================================');
-    console.log(`🚀 Komuchi API server started`);
+    console.log(`🚀 Twin API server started`);
     console.log(`   URL: http://${env.API_HOST}:${env.API_PORT}`);
     console.log(`   Environment: ${env.NODE_ENV}`);
     console.log(`   Rate Limit: ${env.RATE_LIMIT_MAX} req/${env.RATE_LIMIT_WINDOW_MS}ms`);

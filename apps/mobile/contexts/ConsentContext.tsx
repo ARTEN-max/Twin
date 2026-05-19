@@ -1,4 +1,3 @@
-/* global console */
 /**
  * ConsentContext
  *
@@ -13,7 +12,7 @@ import {
   acceptConsent as acceptConsentApi,
   revokeConsent as revokeConsentApi,
   type MeResponse,
-} from '@komuchi/shared';
+} from '@twin/shared';
 import { useAuth } from './AuthContext';
 
 const CONSENT_KEY = 'twin:consent';

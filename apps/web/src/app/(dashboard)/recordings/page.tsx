@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { useRecordings } from '@/hooks/use-recordings';
 import type { Recording } from '@/lib/api';
-import { cn } from '@komuchi/ui';
+import { cn } from '@twin/ui';
 
 const STATUS_CONFIG = {
   pending: {

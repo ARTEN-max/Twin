@@ -12,7 +12,7 @@ import {
   CheckCircle,
   AlertCircle,
 } from 'lucide-react';
-import { cn } from '@komuchi/ui';
+import { cn } from '@twin/ui';
 import {
   formatTimer,
   getExtensionForMime,

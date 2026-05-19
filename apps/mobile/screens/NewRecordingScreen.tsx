@@ -1,4 +1,3 @@
-/* global setTimeout, clearTimeout */
 /**
  * NewRecordingScreen
  *
@@ -23,7 +22,7 @@ import { theme } from '../theme';
 import { useAuth } from '../contexts/AuthContext';
 import { useConsent } from '../contexts/ConsentContext';
 import { useRecording } from '../contexts/RecordingContext';
-import { getMe } from '@komuchi/shared';
+import { getMe } from '@twin/shared';
 
 type LocalState = 'mic-explainer' | 'mic-denied' | 'requesting-permission' | null;
 

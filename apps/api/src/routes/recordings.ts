@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { RecordingStatus } from '@prisma/client';
 import { z } from 'zod';
-import { RecordingMode } from '@komuchi/shared';
+import { RecordingMode } from '@twin/shared';
 import {
   createRecording,
   setRecordingObjectKey,

@@ -117,8 +117,8 @@ describe('Voice Profile Routes', () => {
       });
 
       // Verify it's deleted
-      const testDb = getTestDb();
-      const user = await testDb.user.findUnique({
+      const db = getTestDb();
+      const user = await db.user.findUnique({
         where: { id: testUser.id },
         select: { hasVoiceProfile: true },
       });

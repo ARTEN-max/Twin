@@ -1,4 +1,3 @@
-/* global console */
 /**
  * RecordingsScreen
  *
@@ -27,11 +26,12 @@ import {
   type RecordingSummary,
   toRecordingSummary,
   ApiClientError,
-} from '@komuchi/shared';
+} from '@twin/shared';
 import { useAuth } from '../contexts/AuthContext';
 import { theme } from '../theme';
 
 const DATE_KEY = 'twin:selected_date';
+type RecordingApiItem = Parameters<typeof toRecordingSummary>[0];
 
 function todayString(): string {
   return new Date().toISOString().split('T')[0];
@@ -79,44 +79,57 @@ export default function RecordingsScreen({
     AsyncStorage.setItem(DATE_KEY, newDate);
   }, []);
 
-  const loadRecordings = useCallback(async (date: string, showRefreshing = false) => {
-    try {
-      if (showRefreshing) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
+  const loadRecordings = useCallback(
+    async (date: string, showRefreshing = false) => {
+      if (!user?.uid) {
+        setRecordings([]);
+        setLoading(false);
+        setRefreshing(false);
+        setError('Please sign in again to load recordings.');
+        return;
       }
-      setError(null);
 
-      const response = await listRecordings(user!.uid, {
-        date,
-        limit: 50, // Load enough for a day
-      });
+      try {
+        if (showRefreshing) {
+          setRefreshing(true);
+        } else {
+          setLoading(true);
+        }
+        setError(null);
 
-      // Convert API response to RecordingSummary
-      // Response structure: { data: Recording[], pagination: {...} }
-      // handleResponse now returns the full PaginatedResponse for paginated endpoints
-      const recordingsArray = response?.data || [];
-      if (!Array.isArray(recordingsArray)) {
-        console.error('Unexpected response format:', response);
-        throw new Error('Invalid response format: expected array in data field');
+        const response = await listRecordings(user.uid, {
+          date,
+          limit: 50, // Load enough for a day
+        });
+
+        // Convert API response to RecordingSummary
+        // Response structure: { data: Recording[], pagination: {...} }
+        // handleResponse now returns the full PaginatedResponse for paginated endpoints
+        const recordingsArray = response?.data || [];
+        if (!Array.isArray(recordingsArray)) {
+          console.error('Unexpected response format:', response);
+          throw new Error('Invalid response format: expected array in data field');
+        }
+        const summaries = recordingsArray.map((recording: RecordingApiItem) =>
+          toRecordingSummary(recording)
+        );
+        setRecordings(summaries);
+      } catch (err) {
+        console.error('Error loading recordings:', err);
+        const errorMessage =
+          err instanceof ApiClientError
+            ? `API Error: ${err.message} (${err.statusCode})`
+            : err instanceof Error
+              ? err.message
+              : 'Failed to load recordings';
+        setError(errorMessage);
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
       }
-      const summaries = recordingsArray.map((recording: any) => toRecordingSummary(recording));
-      setRecordings(summaries);
-    } catch (err) {
-      console.error('Error loading recordings:', err);
-      const errorMessage =
-        err instanceof ApiClientError
-          ? `API Error: ${err.message} (${err.statusCode})`
-          : err instanceof Error
-            ? err.message
-            : 'Failed to load recordings';
-      setError(errorMessage);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
+    },
+    [user?.uid]
+  );
 
   useEffect(() => {
     loadRecordings(selectedDate);

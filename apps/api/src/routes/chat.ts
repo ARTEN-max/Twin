@@ -128,6 +128,32 @@ function getTextFromUIMessage(message: {
     .join('');
 }
 
+function isOpenAIQuotaError(error: unknown): boolean {
+  const parts = [String(error)];
+  if (error instanceof Error) {
+    parts.push(error.name, error.message, error.stack ?? '');
+  }
+  if (error && typeof error === 'object') {
+    try {
+      parts.push(JSON.stringify(error, Object.getOwnPropertyNames(error)));
+    } catch {
+      // Some SDK errors contain circular metadata. The Error fields above are enough.
+    }
+  }
+
+  const details = parts.join(' ').toLowerCase();
+  return (
+    details.includes('insufficient_quota') ||
+    details.includes('exceeded your current quota') ||
+    (details.includes('429') && details.includes('quota'))
+  );
+}
+
+function buildChatQuotaFallback(recordingId?: string): string {
+  const scope = recordingId ? 'this recording' : 'today';
+  return `AI chat is temporarily unavailable because the OpenAI API key has no available quota. Your ${scope} context is saved, so once the key has billing/quota again I can answer using it.`;
+}
+
 // ============================================
 // Routes
 // ============================================
@@ -392,16 +418,25 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
       });
     } else {
       // Non-streaming response for mobile clients - use generateText instead of streamText
-      const result = await generateText({
-        model: openai('gpt-4o-mini'),
-        system: systemContent,
-        messages: modelMessages,
-        temperature: 0.5,
-        maxOutputTokens: 2048,
-      });
+      let responseText: string;
+      try {
+        const result = await generateText({
+          model: openai('gpt-4o-mini'),
+          system: systemContent,
+          messages: modelMessages,
+          temperature: 0.5,
+          maxOutputTokens: 2048,
+        });
 
-      // generateText returns { text: string } directly - no Promise wrapping
-      const responseText = result.text;
+        // generateText returns { text: string } directly - no Promise wrapping
+        responseText = result.text;
+      } catch (error) {
+        request.log.error(error, 'Chat generation failed');
+        if (!isOpenAIQuotaError(error)) {
+          throw error;
+        }
+        responseText = buildChatQuotaFallback(recordingId);
+      }
 
       if (!responseText || !responseText.trim()) {
         return reply.status(500).send({

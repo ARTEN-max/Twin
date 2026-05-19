@@ -8,7 +8,6 @@ import {
   createTestTranscript,
 } from '../../__tests__/helpers/test-utils.js';
 import { getDayContext, getRecordingContext } from '../context.service.js';
-import { getTestDb } from '../../__tests__/helpers/test-utils.js';
 
 describe('Context Service', () => {
   let testUser: Awaited<ReturnType<typeof createTestUser>>;

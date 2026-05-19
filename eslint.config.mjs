@@ -34,7 +34,7 @@ export default [
       ...tsPlugin.configs.recommended.rules,
       '@typescript-eslint/no-unused-vars': [
         'error',
-        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' },
       ],
       '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/consistent-type-imports': ['error', { prefer: 'type-imports' }],
@@ -63,6 +63,48 @@ export default [
     },
     rules: {
       'no-console': 'off',
+    },
+  },
+  // Node.js globals for mobile JS config files (app.config.js, metro.config.js, etc.)
+  {
+    files: ['apps/mobile/**/*.{js,mjs,cjs}'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+      },
+    },
+  },
+  // React Native globals for mobile app
+  {
+    files: ['apps/mobile/**/*.{ts,tsx}'],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
+        process: 'readonly',
+        __DEV__: 'readonly',
+        global: 'readonly',
+      },
+    },
+    rules: {
+      'no-console': 'off',
+    },
+  },
+  // Jest globals for test files
+  {
+    files: ['**/__tests__/**/*.{ts,tsx}', '**/*.test.{ts,tsx}'],
+    languageOptions: {
+      globals: {
+        ...globals.jest,
+      },
+    },
+  },
+  // Browser globals for shared UI package
+  {
+    files: ['packages/ui/**/*.{ts,tsx}'],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
+      },
     },
   },
 ];

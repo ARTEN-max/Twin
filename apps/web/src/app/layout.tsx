@@ -10,7 +10,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: 'Komuchi - Audio Debrief',
+  title: 'Twin - Audio Debrief',
   description: 'Transform your audio recordings into actionable debrief cards',
 };
 

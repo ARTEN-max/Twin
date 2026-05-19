@@ -79,7 +79,7 @@ const envSchema = z.object({
 
   // OpenTelemetry (optional)
   OTEL_ENABLED: z.coerce.boolean().default(false),
-  OTEL_SERVICE_NAME: z.string().default('komuchi-api'),
+  OTEL_SERVICE_NAME: z.string().default('twin-api'),
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional(),
 
   // Firebase Auth (optional – omit to keep using x-user-id header)
@@ -141,6 +141,12 @@ export function validateEnv(): Env {
     process.exit(1);
   }
 
+  if (env.NODE_ENV === 'production' && !env.FIREBASE_PROJECT_ID) {
+    console.error('❌ FIREBASE_PROJECT_ID is required in production');
+    console.error('Protected API routes cannot authenticate Firebase ID tokens without it.');
+    process.exit(1);
+  }
+
   if (env.TRANSCRIPTION_PROVIDER === 'deepgram' && !env.DEEPGRAM_API_KEY) {
     console.error('❌ DEEPGRAM_API_KEY is required when TRANSCRIPTION_PROVIDER=deepgram');
     process.exit(1);
@@ -158,6 +164,13 @@ export function getEnv(): Env {
     return validateEnv();
   }
   return validatedEnv;
+}
+
+/**
+ * Reset the cached environment. Intended for tests that mutate process.env.
+ */
+export function resetValidatedEnv(): void {
+  validatedEnv = null;
 }
 
 /**

@@ -1,5 +1,5 @@
 {
-  "name": "@komuchi/api",
+  "name": "@twin/api",
   "version": "0.0.1",
   "private": true,
   "type": "module",
@@ -34,7 +34,7 @@
     "@fastify/multipart": "^9.0.3",
     "@fastify/rate-limit": "^10.2.0",
     "@fastify/sensible": "^6.0.2",
-    "@komuchi/shared": "workspace:*",
+    "@twin/shared": "workspace:*",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/auto-instrumentations-node": "^0.53.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.56.0",

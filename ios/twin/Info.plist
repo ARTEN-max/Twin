@@ -27,7 +27,7 @@
       <dict>
         <key>CFBundleURLSchemes</key>
         <array>
-          <string>com.komuchi.mobile</string>
+          <string>com.twin.mobile</string>
         </array>
       </dict>
     </array>

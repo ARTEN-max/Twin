@@ -24,7 +24,7 @@ export function initTelemetry(): void {
     return;
   }
 
-  const serviceName = process.env.OTEL_SERVICE_NAME || 'komuchi-api';
+  const serviceName = process.env.OTEL_SERVICE_NAME || 'twin-api';
   const exporterEndpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT;
 
   // Configure exporter
@@ -82,7 +82,7 @@ export async function shutdownTelemetry(): Promise<void> {
 /**
  * Get the tracer for creating custom spans
  */
-export function getTracer(name = 'komuchi-api') {
+export function getTracer(name = 'twin-api') {
   return trace.getTracer(name);
 }
 
@@ -95,7 +95,7 @@ export function createSpan(
   options?: { kind?: SpanKind; attributes?: Record<string, string | number | boolean> }
 ): Promise<void> {
   const tracer = getTracer();
-  
+
   return tracer.startActiveSpan(name, { kind: options?.kind }, async (span) => {
     if (options?.attributes) {
       for (const [key, value] of Object.entries(options.attributes)) {

@@ -1,6 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
   "compilerOptions": {
+    "baseUrl": ".",
     "target": "ES2022",
     "lib": ["ES2022"],
     "module": "ESNext",
@@ -22,7 +23,11 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    "incremental": true
+    "incremental": true,
+    "paths": {
+      "@twin/shared": ["packages/shared/src"],
+      "@twin/ui": ["packages/ui/src"]
+    }
   },
   "exclude": ["node_modules", "dist", ".next", "build"]
 }

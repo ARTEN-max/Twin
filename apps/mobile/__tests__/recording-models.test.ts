@@ -1,10 +1,10 @@
 /**
  * Recording Model Tests
- * 
+ *
  * Tests for parsing API responses into RecordingSummary and RecordingDetail models.
  */
 
-import { toRecordingSummary, toRecordingDetail } from '@komuchi/shared';
+import { toRecordingSummary, toRecordingDetail } from '@twin/shared';
 
 describe('Recording Models', () => {
   describe('toRecordingSummary', () => {

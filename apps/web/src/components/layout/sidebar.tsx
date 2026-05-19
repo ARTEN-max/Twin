@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Mic, List, PlusCircle, LogOut, User, UserCircle, MessageCircle } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
-import { cn } from '@komuchi/ui';
+import { cn } from '@twin/ui';
 
 const navigation = [
   { name: 'Chat', href: '/chat', icon: MessageCircle },
@@ -25,7 +25,7 @@ export function Sidebar() {
         <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500">
           <Mic className="h-5 w-5 text-white" />
         </div>
-        <span className="text-xl font-bold text-white">Komuchi</span>
+        <span className="text-xl font-bold text-white">Twin</span>
       </div>
 
       {/* Navigation */}

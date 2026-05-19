@@ -1,6 +1,6 @@
 #!/bin/bash
 # ===========================================
-# Komuchi — Start All Services
+# Twin — Start All Services
 # ===========================================
 # Starts everything needed to run the full app:
 #   • Docker infra (Redis, MinIO, Diarization)
@@ -40,7 +40,7 @@ done
 
 # ---- Stop mode ----
 if [ "$STOP_MODE" = true ]; then
-  echo "🛑 Stopping all Komuchi services..."
+  echo "🛑 Stopping all Twin services..."
   
   # Kill background Node processes
   if [ -f "$LOG_DIR/api.pid" ]; then
@@ -66,7 +66,7 @@ fi
 # ---- Pre-checks ----
 echo ""
 echo -e "${CYAN}╔═══════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║       Komuchi — Starting Services         ║${NC}"
+echo -e "${CYAN}║       Twin — Starting Services         ║${NC}"
 echo -e "${CYAN}╚═══════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -107,7 +107,7 @@ echo ""
 # ---- 2. Build shared packages (if not built) ----
 if [ ! -d "$PROJECT_ROOT/packages/shared/dist" ]; then
   echo "🔨 Building shared packages..."
-  pnpm build --filter=@komuchi/shared --filter=@komuchi/ui
+  pnpm build --filter=@twin/shared --filter=@twin/ui
   echo -e "  ${GREEN}✓ Shared packages built${NC}"
   echo ""
 fi

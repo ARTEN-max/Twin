@@ -30,7 +30,7 @@ describe('Health Routes', () => {
       const body = JSON.parse(response.body);
       expect(body).toMatchObject({
         status: 'ok',
-        service: 'komuchi-api',
+        service: 'twin-api',
         version: expect.any(String),
         uptime: expect.any(Number),
         timestamp: expect.any(String),
@@ -49,7 +49,7 @@ describe('Health Routes', () => {
       const body = JSON.parse(response.body);
       expect(body).toMatchObject({
         status: expect.stringMatching(/^(ok|degraded|unhealthy)$/),
-        service: 'komuchi-api',
+        service: 'twin-api',
         version: expect.any(String),
         uptime: expect.any(Number),
         timestamp: expect.any(String),
@@ -76,7 +76,7 @@ describe('Health Routes', () => {
       const body = JSON.parse(response.body);
       expect(body).toMatchObject({
         status: expect.stringMatching(/^(ok|degraded|unhealthy)$/),
-        service: 'komuchi-api',
+        service: 'twin-api',
         version: expect.any(String),
         uptime: expect.any(Number),
         timestamp: expect.any(String),

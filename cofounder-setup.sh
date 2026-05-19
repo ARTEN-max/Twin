@@ -37,13 +37,13 @@ pnpm install
 # Build shared package
 echo ""
 echo "🔨 Building shared package..."
-pnpm build --filter=@komuchi/shared
+pnpm build --filter=@twin/shared
 
 # Open Xcode
 echo ""
 echo "📱 Opening Xcode workspace..."
 cd apps/mobile
-open ios/KomuchiMobile.xcworkspace
+open ios/TwinMobile.xcworkspace
 
 echo ""
 echo "✅ Setup complete!"
@@ -52,7 +52,7 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "📱 Next steps in Xcode:"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-echo "1. Select 'KomuchiMobile' scheme (top toolbar, next to play button)"
+echo "1. Select 'TwinMobile' scheme (top toolbar, next to play button)"
 echo "2. Select your iPhone from device dropdown"
 echo "3. Product → Scheme → Edit Scheme..."
 echo "   - Select 'Run' in left sidebar"

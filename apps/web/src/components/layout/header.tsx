@@ -21,7 +21,7 @@ export function Header() {
   return (
     <header className="flex h-16 items-center border-b border-white/10 bg-white/5 px-6 backdrop-blur-xl">
       <h1 className="bg-gradient-to-r from-white to-slate-300 bg-clip-text text-xl font-semibold text-transparent">
-        {title || 'Komuchi'}
+        {title || 'Twin'}
       </h1>
     </header>
   );

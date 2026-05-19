@@ -1,9 +1,10 @@
 {
   "extends": ["expo/tsconfig.base", "../../tsconfig.base.json"],
   "compilerOptions": {
+    "baseUrl": ".",
     "strict": true,
     "paths": {
-      "@komuchi/shared": ["../../packages/shared/src"]
+      "@twin/shared": ["../../packages/shared"]
     }
   },
   "include": ["**/*.ts", "**/*.tsx"],

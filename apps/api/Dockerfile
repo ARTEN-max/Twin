@@ -1,5 +1,5 @@
 # =========================================
-# Komuchi API Dockerfile
+# Twin API Dockerfile
 # =========================================
 # Build context must be the monorepo root:
 #   docker build -f apps/api/Dockerfile .
@@ -32,8 +32,8 @@ COPY packages/ui ./packages/ui
 COPY apps/api ./apps/api
 
 # Build shared packages first, then the API
-RUN pnpm --filter=@komuchi/shared build
-RUN pnpm --filter=@komuchi/api build
+RUN pnpm --filter=@twin/shared build
+RUN pnpm --filter=@twin/api build
 
 # ---- Runtime ----
 FROM base AS runtime

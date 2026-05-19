@@ -1,4 +1,3 @@
-/* global process, console */
 /**
  * SettingsScreen
  *
@@ -29,7 +28,7 @@ import {
 import { auth } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useSubscription } from '../contexts/SubscriptionContext';
-import { deleteAccountApi } from '@komuchi/shared';
+import { deleteAccountApi } from '@twin/shared';
 
 const SUPPORT_EMAIL = process.env.EXPO_PUBLIC_SUPPORT_EMAIL || '';
 

@@ -149,11 +149,11 @@ export function startDebriefWorker(): Worker<DebriefJobData, DebriefResult> | nu
           error instanceof Error ? error.message : 'Unknown error'
         );
 
-        // Mark the recording as failed so the UI doesn't get stuck in "processing".
-        // The transcript is still available and the user can retry debrief generation.
+        // The transcript is still usable even if the optional debrief fails.
+        // Keep the recording openable and let the failed DEBRIEF job surface retry state.
         await db.recording.update({
           where: { id: recordingId },
-          data: { status: 'failed' },
+          data: { status: 'complete' },
         });
 
         throw error;

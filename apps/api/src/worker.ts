@@ -1,10 +1,10 @@
 /**
  * Worker Process Entry Point
- * 
+ *
  * Run this separately from the API server to process background jobs.
- * 
+ *
  * Usage:
- *   pnpm --filter=@komuchi/api dev:worker   # Development
+ *   pnpm --filter=@twin/api dev:worker   # Development
  *   node dist/worker.js                      # Production
  */
 
@@ -22,7 +22,7 @@ import { disconnectRedis } from './lib/redis.js';
 import { validateEnv, getEnv } from './lib/env.js';
 import { initSentry, flushSentry, captureException } from './lib/sentry.js';
 
-console.log('🔧 Komuchi Worker Process Starting...\n');
+console.log('🔧 Twin Worker Process Starting...\n');
 
 // Validate environment configuration
 console.log('📋 Validating environment configuration...');
@@ -35,7 +35,7 @@ const env = getEnv();
 initSentry();
 
 console.log('========================================');
-console.log(`🔧 Komuchi Worker Process`);
+console.log(`🔧 Twin Worker Process`);
 console.log(`   Environment: ${env.NODE_ENV}`);
 console.log(`   Transcription Provider: ${env.TRANSCRIPTION_PROVIDER}`);
 console.log(`   Telemetry: ${env.OTEL_ENABLED ? 'enabled' : 'disabled'}`);

@@ -1,4 +1,3 @@
-/* global setTimeout */
 import React, { useState, useRef } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { View, StyleSheet, ActivityIndicator } from 'react-native';

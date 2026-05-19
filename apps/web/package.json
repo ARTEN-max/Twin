@@ -1,5 +1,5 @@
 {
-  "name": "@komuchi/web",
+  "name": "@twin/web",
   "version": "0.0.1",
   "private": true,
   "scripts": {
@@ -15,8 +15,8 @@
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.80",
-    "@komuchi/shared": "workspace:*",
-    "@komuchi/ui": "workspace:*",
+    "@twin/shared": "workspace:*",
+    "@twin/ui": "workspace:*",
     "@tailwindcss/typography": "^0.5.19",
     "@tanstack/react-query": "^5.62.8",
     "ai": "^6.0.78",

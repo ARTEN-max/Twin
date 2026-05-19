@@ -400,9 +400,11 @@ async function transcribeInChunks(
       let totalDuration = 0;
       let language = 'en';
       let modelName: string | undefined;
+      let chunkCount = 0;
 
-      for (const chunk of chunks) {
-        log(`Transcribing chunk ${chunk.index + 1}/${chunks.length}`);
+      for await (const chunk of chunks) {
+        chunkCount += 1;
+        log(`Transcribing chunk ${chunk.index + 1}`);
         const result = await transcribe(
           { type: 'buffer', data: chunk.buffer, mimeType: chunk.mimeType },
           { punctuate: true, diarize: false }
@@ -436,7 +438,7 @@ async function transcribeInChunks(
         duration: totalDuration,
         metadata: {
           model: modelName,
-          chunkCount: chunks.length,
+          chunkCount,
         },
       };
     }

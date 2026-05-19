@@ -1,4 +1,3 @@
-/* global setTimeout, clearTimeout, AbortController, console, fetch, Response, FormData, __DEV__, process */
 /**
  * VoiceProfileScreen
  *
@@ -27,7 +26,8 @@ import { Audio, InterruptionModeIOS, InterruptionModeAndroid } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import Constants from 'expo-constants';
 import { useAuth } from '../contexts/AuthContext';
-import { getVoiceProfileStatus, deleteVoiceProfile, ApiClientError } from '@komuchi/shared';
+import { getExpoPublicEnv } from '../lib/expoPublicEnv';
+import { getVoiceProfileStatus, deleteVoiceProfile, ApiClientError } from '@twin/shared';
 import { theme } from '../theme';
 
 // User ID is now provided by Firebase Auth via useAuth()
@@ -392,10 +392,10 @@ export default function VoiceProfileScreen({ onBack, onPaywall }: VoiceProfileSc
 
       // Get API base URL from config (set in app.json extra or EXPO_PUBLIC_API_BASE_URL env var)
       // On simulator: localhost works. On physical device: use your computer's LAN IP.
-      const configUrl =
-        Constants.expoConfig?.extra?.EXPO_PUBLIC_API_BASE_URL ||
-        (typeof process !== 'undefined' ? process.env?.EXPO_PUBLIC_API_BASE_URL : null);
-      const baseUrl = configUrl || 'http://localhost:3001';
+      const baseUrl = getExpoPublicEnv(
+        'EXPO_PUBLIC_API_BASE_URL',
+        Constants.expoConfig?.extra?.EXPO_PUBLIC_API_BASE_URL || 'http://localhost:3001'
+      );
       const url = `${baseUrl}/api/voice-profile/enroll`;
 
       // Health check before uploading

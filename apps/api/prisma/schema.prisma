@@ -1,4 +1,4 @@
-// Prisma schema for Komuchi
+// Prisma schema for Twin
 // https://pris.ly/d/prisma-schema
 
 generator client {

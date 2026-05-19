@@ -64,11 +64,11 @@ async function checkRedis(): Promise<HealthCheck> {
 
 function getOverallStatus(checks: Record<string, HealthCheck>): 'ok' | 'degraded' | 'unhealthy' {
   const statuses = Object.values(checks).map((c) => c.status);
-  
+
   if (statuses.every((s) => s === 'healthy')) {
     return 'ok';
   }
-  
+
   if (statuses.some((s) => s === 'unhealthy')) {
     // If critical services are down, return unhealthy
     const criticalServices = ['database', 'redis'];
@@ -79,7 +79,7 @@ function getOverallStatus(checks: Record<string, HealthCheck>): 'ok' | 'degraded
     }
     return 'degraded';
   }
-  
+
   return 'degraded';
 }
 
@@ -92,17 +92,17 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
 
   /**
    * GET /health
-   * 
+   *
    * Basic liveness probe - returns 200 if the server is running.
    * Does NOT check dependencies (use /ready for that).
-   * 
+   *
    * Use for: Kubernetes liveness probe, load balancer health check
    */
   app.get('/health', async () => {
     const response: HealthResponse = {
       status: 'ok',
       timestamp: new Date().toISOString(),
-      service: 'komuchi-api',
+      service: 'twin-api',
       version: process.env.npm_package_version || '0.0.1',
       uptime: Math.floor((Date.now() - startTime) / 1000),
     };
@@ -112,10 +112,10 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
 
   /**
    * GET /ready
-   * 
+   *
    * Readiness probe - checks all dependencies.
    * Returns 200 only if all critical dependencies are healthy.
-   * 
+   *
    * Use for: Kubernetes readiness probe, deployment verification
    */
   app.get('/ready', async (_request, reply) => {
@@ -130,7 +130,7 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
     const response: HealthResponse = {
       status: overallStatus,
       timestamp: new Date().toISOString(),
-      service: 'komuchi-api',
+      service: 'twin-api',
       version: process.env.npm_package_version || '0.0.1',
       uptime: Math.floor((Date.now() - startTime) / 1000),
       checks,
@@ -141,7 +141,7 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
 
   /**
    * GET /health/detailed
-   * 
+   *
    * Detailed health information including configuration.
    * Only available in non-production or with auth.
    */
@@ -150,7 +150,7 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
     if (isProduction()) {
       const authHeader = request.headers['x-health-token'];
       const expectedToken = process.env.HEALTH_CHECK_TOKEN;
-      
+
       if (!expectedToken || authHeader !== expectedToken) {
         return reply.status(401).send({
           error: 'Unauthorized',
@@ -169,7 +169,7 @@ export const healthRoutes: FastifyPluginAsync = async (app) => {
     return {
       status: overallStatus,
       timestamp: new Date().toISOString(),
-      service: 'komuchi-api',
+      service: 'twin-api',
       version: process.env.npm_package_version || '0.0.1',
       uptime: Math.floor((Date.now() - startTime) / 1000),
       checks,

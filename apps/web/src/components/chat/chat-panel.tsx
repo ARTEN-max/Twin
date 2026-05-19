@@ -7,7 +7,7 @@ import { MessageCircle, Send, Loader2 } from 'lucide-react';
 import { useUserId } from '@/lib/auth';
 import { generateChatOpener } from '@/lib/api';
 import type { ChatMessage } from '@/lib/api';
-import { cn } from '@komuchi/ui';
+import { cn } from '@twin/ui';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
 

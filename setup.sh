@@ -1,6 +1,6 @@
 #!/bin/bash
 # ===========================================
-# Komuchi — First-Time Setup
+# Twin — First-Time Setup
 # ===========================================
 # Run this once after cloning the repo:
 #   chmod +x setup.sh && ./setup.sh
@@ -16,7 +16,7 @@ NC='\033[0m'
 
 echo ""
 echo -e "${CYAN}╔═══════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║       Komuchi — First-Time Setup          ║${NC}"
+echo -e "${CYAN}║       Twin — First-Time Setup          ║${NC}"
 echo -e "${CYAN}╚═══════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -74,7 +74,7 @@ API_HOST=0.0.0.0
 CORS_ORIGIN=http://localhost:3000,http://localhost:5174
 NODE_ENV=development
 REDIS_URL="redis://localhost:6379"
-S3_BUCKET=komuchi
+S3_BUCKET=twin
 S3_REGION=us-east-1
 S3_ACCESS_KEY_ID=minioadmin
 S3_SECRET_ACCESS_KEY=minioadmin
@@ -102,7 +102,7 @@ echo ""
 
 # ---- Build shared packages ----
 echo "🔨 Building shared packages..."
-pnpm build --filter=@komuchi/shared --filter=@komuchi/ui
+pnpm build --filter=@twin/shared --filter=@twin/ui
 echo -e "  ${GREEN}✓ Shared packages built${NC}"
 echo ""
 

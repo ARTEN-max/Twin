@@ -102,7 +102,7 @@ export async function transcodeUrlToWav16kMono(params: {
   url: string;
   inputMimeType: string;
 }): Promise<TranscodeResult> {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'komuchi-audio-'));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'twin-audio-'));
   const inputPath = path.join(tempDir, `input.${extForMime(params.inputMimeType)}`);
   const outputPath = path.join(tempDir, 'output.wav');
 
@@ -147,9 +147,9 @@ export async function withTempSplitUrlToWav16kMonoChunks<T>(
     inputMimeType: string;
     segmentSeconds: number;
   },
-  fn: (chunks: AudioChunk[]) => Promise<T>
+  fn: (chunks: AsyncIterable<AudioChunk>) => Promise<T>
 ): Promise<T> {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'komuchi-audio-chunks-'));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'twin-audio-chunks-'));
   try {
     const inputPath = path.join(tempDir, `input.${extForMime(params.inputMimeType)}`);
     const chunksDir = path.join(tempDir, 'chunks');
@@ -185,16 +185,18 @@ export async function withTempSplitUrlToWav16kMonoChunks<T>(
       throw new Error('ffmpeg did not produce any audio chunks');
     }
 
-    const chunks = await Promise.all(
-      chunkFiles.map(async (fileName, index) => ({
-        index,
-        buffer: await readFile(path.join(chunksDir, fileName)),
-        mimeType: 'audio/wav' as const,
-        estimatedOffsetSec: index * params.segmentSeconds,
-      }))
-    );
+    async function* streamChunks(): AsyncIterable<AudioChunk> {
+      for (const [index, fileName] of chunkFiles.entries()) {
+        yield {
+          index,
+          buffer: await readFile(path.join(chunksDir, fileName)),
+          mimeType: 'audio/wav',
+          estimatedOffsetSec: index * params.segmentSeconds,
+        };
+      }
+    }
 
-    return await fn(chunks);
+    return await fn(streamChunks());
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

@@ -17,6 +17,6 @@ describe('Header', () => {
   it('should render default title for unknown routes', () => {
     mockUsePathname.mockReturnValue('/unknown');
     render(<Header />);
-    expect(screen.getByText('Komuchi')).toBeInTheDocument();
+    expect(screen.getByText('Twin')).toBeInTheDocument();
   });
 });

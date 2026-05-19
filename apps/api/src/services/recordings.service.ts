@@ -1,6 +1,6 @@
 import type { Prisma, Recording, RecordingStatus, RecordingMode } from '@prisma/client';
 import { db } from '../lib/db.js';
-import type { TranscriptSegment, DebriefSection } from '@komuchi/shared';
+import type { TranscriptSegment, DebriefSection } from '@twin/shared';
 
 // ============================================
 // Types
