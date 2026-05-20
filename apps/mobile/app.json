@@ -14,7 +14,7 @@
     "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.abdulrahman.twinaiapp",
+      "bundleIdentifier": "ai.twin.app",
       "buildNumber": "1",
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Twin needs microphone access to record conversations for transcription and AI debriefs.",
@@ -32,7 +32,7 @@
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS"
       ],
-      "package": "com.abdulrahman.twinai"
+      "package": "ai.twin.app"
     },
     "web": {
       "favicon": "./assets/favicon.png",
