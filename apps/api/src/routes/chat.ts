@@ -2,8 +2,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import type { UIMessage } from 'ai';
 import { streamText, generateText, convertToModelMessages } from 'ai';
-import { createOpenAI } from '@ai-sdk/openai';
-import OpenAI from 'openai';
+import { createAnthropic } from '@ai-sdk/anthropic';
 import { getEnv } from '../lib/env.js';
 import { db } from '../lib/db.js';
 import {
@@ -109,10 +108,10 @@ function requireUser(request: { firebaseUser?: FirebaseUser | null }): FirebaseU
   return user;
 }
 
-function getOpenAIClient(): OpenAI | null {
+function getClaudeModel(modelId: string) {
   const env = getEnv();
-  if (!env.OPENAI_API_KEY) return null;
-  return new OpenAI({ apiKey: env.OPENAI_API_KEY });
+  const anthropic = createAnthropic({ apiKey: env.ANTHROPIC_API_KEY });
+  return anthropic(modelId);
 }
 
 /** Extract plain text from a UIMessage for persistence */
@@ -128,30 +127,19 @@ function getTextFromUIMessage(message: {
     .join('');
 }
 
-function isOpenAIQuotaError(error: unknown): boolean {
-  const parts = [String(error)];
-  if (error instanceof Error) {
-    parts.push(error.name, error.message, error.stack ?? '');
-  }
-  if (error && typeof error === 'object') {
-    try {
-      parts.push(JSON.stringify(error, Object.getOwnPropertyNames(error)));
-    } catch {
-      // Some SDK errors contain circular metadata. The Error fields above are enough.
-    }
-  }
-
-  const details = parts.join(' ').toLowerCase();
+function isClaudeRateLimitError(error: unknown): boolean {
+  const details = [String(error)];
+  if (error instanceof Error) details.push(error.name, error.message, error.stack ?? '');
   return (
-    details.includes('insufficient_quota') ||
-    details.includes('exceeded your current quota') ||
-    (details.includes('429') && details.includes('quota'))
+    details.join(' ').toLowerCase().includes('rate_limit') ||
+    details.join(' ').includes('529') ||
+    details.join(' ').includes('529')
   );
 }
 
-function buildChatQuotaFallback(recordingId?: string): string {
+function buildChatRateLimitFallback(recordingId?: string): string {
   const scope = recordingId ? 'this recording' : 'today';
-  return `AI chat is temporarily unavailable because the OpenAI API key has no available quota. Your ${scope} context is saved, so once the key has billing/quota again I can answer using it.`;
+  return `AI chat is temporarily unavailable (rate limit). Your ${scope} context is saved — try again in a moment.`;
 }
 
 // ============================================
@@ -242,42 +230,31 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     const debriefs = await getDayDebriefs({ userId, date });
     let openerContent: string;
 
-    const client = getOpenAIClient();
     if (debriefs.hasContent && debriefs.markdown) {
-      if (client) {
-        try {
-          const res = await client.chat.completions.create({
-            model: 'gpt-4o-mini',
-            messages: [
-              { role: 'system', content: OPENER_FROM_DEBRIEF_PROMPT },
-              { role: 'user', content: debriefs.markdown },
-            ],
-            temperature: 0.5,
-            max_tokens: 500,
-          });
-          const text = res.choices[0]?.message?.content?.trim();
-          openerContent = text || FALLBACK_OPENER;
-        } catch {
-          openerContent = FALLBACK_OPENER;
-        }
-      } else {
+      try {
+        const { text } = await generateText({
+          model: getClaudeModel('claude-haiku-4-5'),
+          system: OPENER_FROM_DEBRIEF_PROMPT,
+          messages: [{ role: 'user', content: debriefs.markdown }],
+          temperature: 0.5,
+          maxOutputTokens: 500,
+        });
+        openerContent = text?.trim() || FALLBACK_OPENER;
+      } catch {
         openerContent = FALLBACK_OPENER;
       }
     } else {
       const { context, hasContent } = await getDayContext({ userId, date });
-      if (hasContent && context && client) {
+      if (hasContent && context) {
         try {
-          const res = await client.chat.completions.create({
-            model: 'gpt-4o-mini',
-            messages: [
-              { role: 'system', content: OPENER_FROM_TRANSCRIPT_PROMPT },
-              { role: 'user', content: context },
-            ],
+          const { text } = await generateText({
+            model: getClaudeModel('claude-haiku-4-5'),
+            system: OPENER_FROM_TRANSCRIPT_PROMPT,
+            messages: [{ role: 'user', content: context }],
             temperature: 0.5,
-            max_tokens: 500,
+            maxOutputTokens: 500,
           });
-          const text = res.choices[0]?.message?.content?.trim();
-          openerContent = text || FALLBACK_OPENER;
+          openerContent = text?.trim() || FALLBACK_OPENER;
         } catch {
           openerContent = FALLBACK_OPENER;
         }
@@ -352,12 +329,12 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     }
 
     const env = getEnv();
-    if (!env.OPENAI_API_KEY) {
+    if (!env.ANTHROPIC_API_KEY) {
       const mockReply =
-        "I don't have access to an AI right now (no OPENAI_API_KEY). Add your key to enable chat.";
+        "I don't have access to an AI right now (no ANTHROPIC_API_KEY). Add your key to enable chat.";
       await addChatMessage(session.id, 'assistant', mockReply);
       return reply.status(503).send({
-        error: 'No OPENAI_API_KEY',
+        error: 'No ANTHROPIC_API_KEY',
         message: mockReply,
       });
     }
@@ -382,7 +359,6 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
         : '\n\n(No transcripts for this day yet.)';
     }
 
-    const openai = createOpenAI({ apiKey: env.OPENAI_API_KEY });
     const modelMessages = await convertToModelMessages(uiMessages as unknown as UIMessage[]);
 
     // Check if client wants streaming (via header) or non-streaming response
@@ -391,7 +367,7 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
     if (wantsStreaming) {
       // Streaming response for web clients
       const result = streamText({
-        model: openai('gpt-4o-mini'),
+        model: getClaudeModel('claude-haiku-4-5'),
         system: systemContent,
         messages: modelMessages,
         temperature: 0.5,
@@ -417,25 +393,24 @@ export const chatRoutes: FastifyPluginAsync = async (app) => {
         },
       });
     } else {
-      // Non-streaming response for mobile clients - use generateText instead of streamText
+      // Non-streaming response for mobile clients
       let responseText: string;
       try {
         const result = await generateText({
-          model: openai('gpt-4o-mini'),
+          model: getClaudeModel('claude-haiku-4-5'),
           system: systemContent,
           messages: modelMessages,
           temperature: 0.5,
           maxOutputTokens: 2048,
         });
 
-        // generateText returns { text: string } directly - no Promise wrapping
         responseText = result.text;
       } catch (error) {
         request.log.error(error, 'Chat generation failed');
-        if (!isOpenAIQuotaError(error)) {
+        if (!isClaudeRateLimitError(error)) {
           throw error;
         }
-        responseText = buildChatQuotaFallback(recordingId);
+        responseText = buildChatRateLimitFallback(recordingId);
       }
 
       if (!responseText || !responseText.trim()) {

@@ -49,10 +49,11 @@ const envSchema = z.object({
   S3_SECRET_ACCESS_KEY: z.string().min(1),
   S3_ENDPOINT: z.string().url().optional(),
 
-  // AI Services (OPENAI_API_KEY is only required when DEBRIEF_PROVIDER=openai)
+  // AI Services
+  ANTHROPIC_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
   TRANSCRIPTION_PROVIDER: z.enum(['deepgram', 'openai', 'whisper-local', 'mock']).default('openai'),
-  DEBRIEF_PROVIDER: z.enum(['openai']).default('openai'),
+  DEBRIEF_PROVIDER: z.enum(['openai', 'claude']).default('claude'),
   DEEPGRAM_API_KEY: z.string().min(1).optional(),
 
   // Local Whisper (optional)

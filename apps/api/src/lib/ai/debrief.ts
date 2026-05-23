@@ -1,4 +1,5 @@
-import OpenAI from 'openai';
+import { generateText } from 'ai';
+import { createAnthropic } from '@ai-sdk/anthropic';
 import type { DebriefSection } from '@twin/shared';
 import { getEnv } from '../env.js';
 
@@ -24,9 +25,6 @@ interface DebriefAnalysis {
 
 const TRANSCRIPT_CHARS_PER_SUMMARY_CHUNK = 16000;
 const DIRECT_DEBRIEF_CHAR_LIMIT = 24000;
-
-// NOTE: We intentionally do NOT enforce a fixed structured output schema here.
-// The debrief is free-form markdown so it can adapt to the topic/content.
 
 // ============================================
 // System Prompts by Mode
@@ -107,14 +105,13 @@ Writing rules:
 The goal is not to make the user feel coached. The goal is to make them feel accurately understood.`;
 
 // ============================================
-// OpenAI Client
+// Provider
 // ============================================
 
-function getOpenAIClient(): OpenAI {
+function getClaudeModel(modelId: string) {
   const env = getEnv();
-  return new OpenAI({
-    apiKey: env.OPENAI_API_KEY,
-  });
+  const anthropic = createAnthropic({ apiKey: env.ANTHROPIC_API_KEY });
+  return anthropic(modelId);
 }
 
 function getModeContext(mode: string): string {
@@ -152,15 +149,14 @@ function parseDebriefAnalysis(raw: string): DebriefAnalysis {
 }
 
 async function analyzeTranscript(
-  client: OpenAI,
   transcriptText: string,
   mode: string,
   title: string
 ): Promise<DebriefAnalysis> {
-  const response = await client.chat.completions.create({
-    model: 'gpt-4o-mini',
+  const { text } = await generateText({
+    model: getClaudeModel('claude-haiku-4-5'),
+    system: ANALYSIS_SYSTEM_PROMPT,
     messages: [
-      { role: 'system', content: ANALYSIS_SYSTEM_PROMPT },
       {
         role: 'user',
         content:
@@ -169,43 +165,32 @@ async function analyzeTranscript(
       },
     ],
     temperature: 0.2,
-    max_tokens: 800,
+    maxOutputTokens: 800,
   });
 
-  const content = response.choices[0]?.message?.content?.trim();
-  if (!content) {
-    throw new Error('No content in debrief analysis response');
-  }
-
-  return parseDebriefAnalysis(content);
+  if (!text) throw new Error('No content in debrief analysis response');
+  return parseDebriefAnalysis(text);
 }
 
 // ============================================
 // Main Debrief Generation
 // ============================================
 
-/**
- * Generate a debrief from a transcript using OpenAI
- */
 export async function generateDebrief(
   transcriptText: string,
   mode: string,
   title: string
 ): Promise<DebriefResult> {
-  const client = getOpenAIClient();
   const transcriptForPrompt =
     transcriptText.length > DIRECT_DEBRIEF_CHAR_LIMIT
-      ? await buildLongTranscriptDigest(client, transcriptText, mode, title)
+      ? await buildLongTranscriptDigest(transcriptText, mode, title)
       : transcriptText;
-  const analysis = await analyzeTranscript(client, transcriptForPrompt, mode, title);
+  const analysis = await analyzeTranscript(transcriptForPrompt, mode, title);
 
-  const response = await client.chat.completions.create({
-    model: 'gpt-4o',
+  const { text } = await generateText({
+    model: getClaudeModel('claude-sonnet-4-6'),
+    system: FINAL_DEBRIEF_SYSTEM_PROMPT,
     messages: [
-      {
-        role: 'system',
-        content: FINAL_DEBRIEF_SYSTEM_PROMPT,
-      },
       {
         role: 'user',
         content:
@@ -224,26 +209,19 @@ export async function generateDebrief(
           `Only give direct advice if the analysis genuinely calls for it.`,
       },
     ],
-    temperature: 0.3, // Lower temperature for more consistent output
-    max_tokens: 4000,
+    temperature: 0.3,
+    maxOutputTokens: 4000,
   });
 
-  const content = response.choices[0]?.message?.content;
-  if (!content) {
-    throw new Error('No content in OpenAI response');
-  }
+  if (!text) throw new Error('No content in Claude response');
 
-  const markdown = content.trim();
+  const markdown = text.trim();
   const sections = extractSectionsFromMarkdown(markdown);
 
-  return {
-    markdown,
-    sections,
-  };
+  return { markdown, sections };
 }
 
 async function buildLongTranscriptDigest(
-  client: OpenAI,
   transcriptText: string,
   mode: string,
   title: string
@@ -253,14 +231,11 @@ async function buildLongTranscriptDigest(
 
   for (let index = 0; index < chunks.length; index++) {
     const chunk = chunks[index];
-    const response = await client.chat.completions.create({
-      model: 'gpt-4o-mini',
+    const { text } = await generateText({
+      model: getClaudeModel('claude-haiku-4-5'),
+      system:
+        'Summarize this transcript chunk for a later final debrief. Preserve emotional shifts, turning points, power dynamics, contradictions, awkwardness, tenderness, avoidance, standout quotes, what changed in the interaction, and anything the speaker may be misreading. Keep it compact but information-dense.',
       messages: [
-        {
-          role: 'system',
-          content:
-            'Summarize this transcript chunk for a later final debrief. Preserve emotional shifts, turning points, power dynamics, contradictions, awkwardness, tenderness, avoidance, standout quotes, what changed in the interaction, and anything the speaker may be misreading. Keep it compact but information-dense.',
-        },
         {
           role: 'user',
           content:
@@ -269,15 +244,11 @@ async function buildLongTranscriptDigest(
         },
       ],
       temperature: 0.2,
-      max_tokens: 600,
+      maxOutputTokens: 600,
     });
 
-    const content = response.choices[0]?.message?.content?.trim();
-    if (!content) {
-      throw new Error(`Failed to summarize transcript chunk ${index + 1}`);
-    }
-
-    summaries.push(`Chunk ${index + 1} summary:\n${content}`);
+    if (!text) throw new Error(`Failed to summarize transcript chunk ${index + 1}`);
+    summaries.push(`Chunk ${index + 1} summary:\n${text.trim()}`);
   }
 
   return (
@@ -354,49 +325,37 @@ Rules:
 
 The goal: they open their app, see this, and feel understood enough to respond.`;
 
-/**
- * Generate a proactive chat opener from a completed debrief.
- * Returns the message text, or null if the content isn't interesting enough.
- */
 export async function generateProactiveOpener(
   debriefMarkdown: string,
   recordingTitle: string
 ): Promise<string | null> {
   try {
-    const client = getOpenAIClient();
-
-    const response = await client.chat.completions.create({
-      model: 'gpt-4o-mini',
+    const { text } = await generateText({
+      model: getClaudeModel('claude-haiku-4-5'),
+      system: PROACTIVE_OPENER_PROMPT,
       messages: [
-        { role: 'system', content: PROACTIVE_OPENER_PROMPT },
         {
           role: 'user',
           content: `Recording title: "${recordingTitle}"\n\nDebrief:\n${debriefMarkdown}`,
         },
       ],
-      temperature: 0.7, // Slightly higher for personality
-      max_tokens: 200,
+      temperature: 0.7,
+      maxOutputTokens: 200,
     });
 
-    const content = response.choices[0]?.message?.content?.trim();
-    if (!content) return null;
-
-    // If AI says SKIP, return null
-    if (content.toUpperCase() === 'SKIP') {
-      return null;
-    }
-
-    return content;
+    if (!text) return null;
+    if (text.trim().toUpperCase() === 'SKIP') return null;
+    return text.trim();
   } catch (error) {
     console.error('[ProactiveOpener] Failed to generate opener:', error);
-    return null; // Don't fail the debrief job over this
+    return null;
   }
 }
 
-/**
- * Extract sections from Markdown for DB storage.
- * We treat each `## Heading` as a section.
- */
+// ============================================
+// Section Extraction
+// ============================================
+
 function extractSectionsFromMarkdown(markdown: string): DebriefSection[] {
   const lines = markdown.split(/\r?\n/);
   const sections: DebriefSection[] = [];
