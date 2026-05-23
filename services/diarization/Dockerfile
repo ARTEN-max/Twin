@@ -6,7 +6,7 @@ WORKDIR /app
 # gcc/build-essential: needed to compile TTS C extensions (monotonic_align)
 # cargo/rustc: needed to compile sudachipy (TTS transitive dep for Japanese)
 # libsndfile1/ffmpeg: audio processing
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     cargo \
     rustc \
