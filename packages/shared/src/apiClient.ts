@@ -1206,6 +1206,22 @@ export async function deleteRecordingApi(
 }
 
 /**
+ * Retry debrief generation for a recording whose debrief failed
+ */
+export async function retryDebrief(
+  userId: string,
+  recordingId: string
+): Promise<{ recordingId: string; queueJobId: string; message: string }> {
+  return apiRequest<{ recordingId: string; queueJobId: string; message: string }>(
+    `/api/recordings/${recordingId}/retry-debrief`,
+    {
+      method: 'POST',
+      headers: buildUserHeaders(userId),
+    }
+  );
+}
+
+/**
  * Register push notification token
  */
 export async function registerPushToken(

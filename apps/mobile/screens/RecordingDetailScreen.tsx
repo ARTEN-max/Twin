@@ -25,6 +25,7 @@ import {
   type RecordingDetail,
   ApiClientError,
   deleteRecordingApi,
+  retryDebrief,
 } from '@twin/shared';
 import { useAuth } from '../contexts/AuthContext';
 import { theme } from '../theme';
@@ -118,6 +119,7 @@ export default function RecordingDetailScreen({
   const [activeTab, setActiveTab] = useState<'debrief' | 'transcript'>('debrief');
   const [isPolling, setIsPolling] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const isMountedRef = useRef(true);
   const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -206,6 +208,18 @@ export default function RecordingDetailScreen({
         },
       },
     ]);
+  };
+
+  const handleRetryDebrief = async () => {
+    setRetrying(true);
+    try {
+      await retryDebrief(userId, recordingId);
+      loadRecording(true);
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'Failed to retry debrief. Please try again.');
+    } finally {
+      setRetrying(false);
+    }
   };
 
   const formatDuration = (seconds: number | null): string => {
@@ -320,6 +334,27 @@ export default function RecordingDetailScreen({
             <Text style={styles.processingText}>
               Processing your recording — this screen updates automatically.
             </Text>
+          </View>
+        )}
+
+        {/* ── Debrief failed banner ── */}
+        {recording.status === 'complete' && !recording.debriefMarkdown && (
+          <View style={styles.debriefFailedCard}>
+            <Text style={styles.debriefFailedTitle}>Debrief unavailable</Text>
+            <Text style={styles.debriefFailedBody}>
+              The debrief couldn't be generated. Your transcript is still saved.
+            </Text>
+            <TouchableOpacity
+              style={styles.retryButton}
+              onPress={handleRetryDebrief}
+              disabled={retrying}
+            >
+              {retrying ? (
+                <ActivityIndicator size="small" color={theme.accent} />
+              ) : (
+                <Text style={styles.retryButtonText}>Generate Debrief</Text>
+              )}
+            </TouchableOpacity>
           </View>
         )}
 
@@ -691,6 +726,47 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: theme.textPrimary,
     lineHeight: 20,
+  },
+
+  // ── Debrief failed ──
+  debriefFailedCard: {
+    backgroundColor: theme.errorDim,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(184,92,92,0.25)',
+    padding: 16,
+    marginBottom: 20,
+    gap: 8,
+  },
+  debriefFailedTitle: {
+    fontFamily: theme.fontMono,
+    fontSize: 13,
+    color: theme.error,
+    letterSpacing: 0.3,
+  },
+  debriefFailedBody: {
+    fontFamily: theme.fontMono,
+    fontSize: 12,
+    color: theme.textSecondary,
+    lineHeight: 18,
+  },
+  retryButton: {
+    marginTop: 4,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: theme.borderStrong,
+    backgroundColor: theme.accentDim,
+    minWidth: 120,
+    alignItems: 'center',
+  },
+  retryButtonText: {
+    fontFamily: theme.fontMono,
+    fontSize: 12,
+    color: theme.accent,
+    letterSpacing: 0.5,
   },
 
   // ── Delete ──
