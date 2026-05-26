@@ -9,10 +9,10 @@ import type {
 
 /**
  * Deepgram Transcription Provider
- * 
+ *
  * Fast and reliable transcription with excellent accuracy.
  * Supports speaker diarization, punctuation, and multiple languages.
- * 
+ *
  * @see https://developers.deepgram.com/docs
  */
 export class DeepgramProvider implements TranscriptionProvider {
@@ -40,10 +40,10 @@ export class DeepgramProvider implements TranscriptionProvider {
   ): Promise<TranscriptionResult> {
     const client = this.getClient();
 
-    // Build Deepgram options
+    // Build Deepgram options. Only send `language` when explicitly provided;
+    // otherwise Deepgram should auto-detect instead of being biased to English.
     const deepgramOptions = {
       model: options.model || 'nova-2',
-      language: options.language || 'en',
       smart_format: true,
       punctuate: options.punctuate ?? true,
       diarize: options.diarize ?? false,
@@ -51,20 +51,18 @@ export class DeepgramProvider implements TranscriptionProvider {
       detect_language: !options.language, // Auto-detect if not specified
     };
 
+    if (options.language) {
+      Object.assign(deepgramOptions, { language: options.language });
+    }
+
     let response;
 
     if (input.type === 'buffer') {
       // Transcribe from buffer
-      response = await client.listen.prerecorded.transcribeFile(
-        input.data,
-        deepgramOptions
-      );
+      response = await client.listen.prerecorded.transcribeFile(input.data, deepgramOptions);
     } else {
       // Transcribe from URL
-      response = await client.listen.prerecorded.transcribeUrl(
-        { url: input.url },
-        deepgramOptions
-      );
+      response = await client.listen.prerecorded.transcribeUrl({ url: input.url }, deepgramOptions);
     }
 
     // Extract results
@@ -127,9 +125,7 @@ export class DeepgramProvider implements TranscriptionProvider {
             start: sentence.start,
             end: sentence.end,
             text: sentence.text.trim(),
-            speaker: diarize && para.speaker !== undefined 
-              ? `Speaker ${para.speaker}` 
-              : undefined,
+            speaker: diarize && para.speaker !== undefined ? `Speaker ${para.speaker}` : undefined,
           });
         }
       }
@@ -142,10 +138,10 @@ export class DeepgramProvider implements TranscriptionProvider {
       let currentSpeaker: number | undefined;
 
       for (const word of alternative.words) {
-        const shouldStartNew = 
+        const shouldStartNew =
           !currentSegment ||
           (diarize && word.speaker !== currentSpeaker) ||
-          (currentSegment.text.length > 200); // Break long segments
+          currentSegment.text.length > 200; // Break long segments
 
         if (shouldStartNew) {
           if (currentSegment) {
@@ -155,9 +151,7 @@ export class DeepgramProvider implements TranscriptionProvider {
             start: word.start,
             end: word.end,
             text: word.word,
-            speaker: diarize && word.speaker !== undefined 
-              ? `Speaker ${word.speaker}` 
-              : undefined,
+            speaker: diarize && word.speaker !== undefined ? `Speaker ${word.speaker}` : undefined,
             confidence: word.confidence,
           };
           currentSpeaker = word.speaker;
