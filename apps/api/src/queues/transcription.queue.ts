@@ -37,6 +37,48 @@ interface WhisperSegment {
   speaker?: string;
 }
 
+interface DiarizationSegment {
+  start: number;
+  end: number;
+  speaker: string;
+  text?: string;
+}
+
+/** Apply YOU/OTHER labels from diarization onto transcript segments. */
+function applyDiarizationLabels(
+  transcriptionResult: { text: string; segments?: WhisperSegment[] },
+  diarizationSegments: DiarizationSegment[]
+): WhisperSegment[] {
+  if (diarizationSegments.length === 0) return transcriptionResult.segments ?? [];
+
+  if (transcriptionResult.segments && transcriptionResult.segments.length > 0) {
+    return transcriptionResult.segments.map((tSeg, i) => {
+      const dSeg = diarizationSegments[i];
+      return {
+        ...tSeg,
+        speaker: dSeg?.speaker || 'speaker_0',
+      };
+    });
+  }
+
+  // On-device transcripts have text but no Whisper timestamps. Build segments
+  // from diarization timings so YOU/OTHER labels are persisted and shown in UI.
+  return diarizationSegments.map((seg, i, arr) => ({
+    start: seg.start,
+    end: seg.end,
+    text: seg.text?.trim() || (arr.length === 1 ? transcriptionResult.text : ''),
+    speaker: seg.speaker,
+  }));
+}
+
+/** Prefix lines with speaker labels for debrief + readable transcript text. */
+function formatLabeledTranscriptText(segments: WhisperSegment[]): string {
+  return segments
+    .filter((seg) => seg.text.trim().length > 0)
+    .map((seg) => `${seg.speaker}: ${seg.text.trim()}`)
+    .join('\n');
+}
+
 const LONG_RECORDING_FILE_SIZE_BYTES = 75 * 1024 * 1024;
 const TRANSCRIPTION_CHUNK_SECONDS = 10 * 60; // 10-min WAV chunks = 19.2 MB, safely under Whisper's 25 MB limit
 const MAX_DIARIZATION_DURATION_SEC = 90 * 60;
@@ -198,18 +240,16 @@ export function startTranscriptionWorker(): Worker<
           diarizationResult = await diarizeAudio(tmpAudioPath, transcriptSegments, userEmbedding);
           log(`Diarization complete: ${diarizationResult.num_speakers} speakers detected`);
 
-          // Merge diarization results with transcript segments
-          // Keep the original text but add speaker labels
-          if (transcriptionResult.segments && diarizationResult.segments) {
-            transcriptionResult.segments = transcriptionResult.segments.map(
-              (tSeg: WhisperSegment, i: number) => {
-                const dSeg = diarizationResult!.segments[i];
-                return {
-                  ...tSeg,
-                  speaker: dSeg?.speaker || 'speaker_0',
-                };
-              }
+          // Merge diarization results with transcript segments (including on-device
+          // transcripts that have text but no Whisper timestamp segments).
+          if (diarizationResult.segments.length > 0) {
+            transcriptionResult.segments = applyDiarizationLabels(
+              transcriptionResult,
+              diarizationResult.segments
             );
+            if (transcriptionResult.segments.some((seg) => seg.speaker)) {
+              transcriptionResult.text = formatLabeledTranscriptText(transcriptionResult.segments);
+            }
             log(`Merged ${transcriptionResult.segments.length} segments with speaker labels`);
           }
         } catch (error) {
