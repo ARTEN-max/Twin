@@ -201,6 +201,26 @@ final class BackgroundAudioRecorder: NSObject, AVAudioRecorderDelegate {
     }
   }
 
+  /// Pick the best on-device speech locale: device locale, then preferred languages.
+  private static func speechRecognizerForDevice() -> SFSpeechRecognizer? {
+    var candidates: [Locale] = [Locale.current]
+    for preferred in Locale.preferredLanguages {
+      candidates.append(Locale(identifier: preferred))
+    }
+    candidates.append(Locale(identifier: "en-US"))
+
+    var seen = Set<String>()
+    for locale in candidates {
+      let key = locale.identifier
+      if seen.contains(key) { continue }
+      seen.insert(key)
+      if let recognizer = SFSpeechRecognizer(locale: locale), recognizer.isAvailable {
+        return recognizer
+      }
+    }
+    return nil
+  }
+
   /// Transcribes a previously-recorded audio file on-device. Forces
   /// `requiresOnDeviceRecognition = true` when supported so audio never
   /// leaves the device for the Apple speech servers (privacy + the whole
@@ -213,7 +233,7 @@ final class BackgroundAudioRecorder: NSObject, AVAudioRecorderDelegate {
         return
       }
 
-      guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US")),
+      guard let recognizer = Self.speechRecognizerForDevice(),
             recognizer.isAvailable else {
         completion(.failure(NSError(domain: "BackgroundRecorder", code: 11,
           userInfo: [NSLocalizedDescriptionKey: "Speech recognizer not available"])))

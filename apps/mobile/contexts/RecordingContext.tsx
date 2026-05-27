@@ -22,7 +22,6 @@ import {
   startRecording as nativeStart,
   stopRecording as nativeStop,
   addRecorderErrorListener,
-  transcribeAudioFile,
   requestSpeechAuthorization,
 } from 'background-recorder';
 import {
@@ -223,23 +222,6 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
       return false;
     }
   }, [markExplainerSeen]);
-
-  /**
-   * Try to transcribe a chunk on-device via SFSpeechRecognizer. Returns the
-   * transcript text on success, or undefined on any failure (permission,
-   * recognition error, file unreadable). Server falls back to Whisper when
-   * undefined — the cost saving compounds as more chunks succeed locally.
-   */
-  const transcribeOnDevice = useCallback(async (uri: string): Promise<string | undefined> => {
-    try {
-      const text = await transcribeAudioFile(uri);
-      const trimmed = text.trim();
-      return trimmed.length > 0 ? trimmed : undefined;
-    } catch (err) {
-      console.warn('On-device transcription failed; falling back to cloud:', err);
-      return undefined;
-    }
-  }, []);
 
   const start = useCallback(
     async (opts?: { hasConsent: boolean }): Promise<StartResult> => {
@@ -450,14 +432,13 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
           setUploadProgress('Upload complete, processing...');
         }
 
-        // On-device transcription before finalizing — file still exists on disk.
-        // Server skips Whisper when transcript is provided.
-        setUploadProgress('Transcribing on device...');
-        const transcript = await transcribeOnDevice(fileUri);
+        // Cloud STT on the worker handles transcription with proper language detection.
+        // On-device iOS recognition was locked to en-US and produced garbled text for
+        // other languages, so we no longer send a client transcript here.
+        setUploadProgress('Upload complete, processing...');
 
         await completeUpload(userId, createResult.recordingId, {
           fileSize,
-          ...(transcript && { transcript }),
         });
 
         resetRecordingLimits();
@@ -480,7 +461,7 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
         setPhase('error');
       }
     },
-    [pollForCompletion, resetRecordingLimits, transcribeOnDevice, user, userId]
+    [pollForCompletion, resetRecordingLimits, user, userId]
   );
 
   const stop = useCallback(async () => {

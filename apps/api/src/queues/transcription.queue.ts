@@ -8,6 +8,7 @@ import {
 } from './config.js';
 import { getPresignedDownloadUrl } from '../lib/storage.js';
 import { transcribe, getTranscriptionProvider } from '../lib/ai/index.js';
+import type { TranscriptionOptions } from '../lib/ai/transcription/types.js';
 import { diarizeAudio } from '../lib/ai/diarization.js';
 import { db } from '../lib/db.js';
 import { transcriptionQueue, debriefQueue } from './queues.js';
@@ -83,6 +84,14 @@ const LONG_RECORDING_FILE_SIZE_BYTES = 75 * 1024 * 1024;
 const TRANSCRIPTION_CHUNK_SECONDS = 10 * 60; // 10-min WAV chunks = 19.2 MB, safely under Whisper's 25 MB limit
 const MAX_DIARIZATION_DURATION_SEC = 90 * 60;
 
+function getCloudTranscriptionOptions(env: ReturnType<typeof getEnv>) {
+  return {
+    punctuate: true,
+    diarize: false as const,
+    ...(env.TRANSCRIPTION_LANGUAGE ? { language: env.TRANSCRIPTION_LANGUAGE } : {}),
+  };
+}
+
 // ============================================
 // Worker
 // ============================================
@@ -121,12 +130,16 @@ export function startTranscriptionWorker(): Worker<
         // and skip the Whisper API call entirely. This is the structural cost
         // reduction — every minute transcribed on-device is a minute we don't
         // pay for. Empty/missing transcripts fall through to the cloud path.
-        const existingTranscript = await db.transcript.findUnique({
-          where: { recordingId },
-          select: { text: true },
-        });
-
         const env = getEnv();
+        const transcriptionOptions = getCloudTranscriptionOptions(env);
+
+        const existingTranscript = env.USE_CLIENT_TRANSCRIPT
+          ? await db.transcript.findUnique({
+              where: { recordingId },
+              select: { text: true, language: true },
+            })
+          : null;
+
         const providerName = getTranscriptionProvider().name;
         const normalizedMime = mimeType.split(';')[0]?.trim().toLowerCase();
 
@@ -145,15 +158,24 @@ export function startTranscriptionWorker(): Worker<
         };
 
         if (existingTranscript?.text && existingTranscript.text.trim().length > 0) {
-          log('Using client-provided transcript — skipping Whisper');
+          log('Using client-provided transcript — skipping cloud STT');
           transcriptionResult = {
             text: existingTranscript.text,
             segments: [],
-            language: 'en',
+            language: existingTranscript.language || env.TRANSCRIPTION_LANGUAGE || 'und',
             duration: 0, // duration not known from on-device path; diarization gate uses this
             metadata: { provider: 'on-device' },
           };
         } else {
+          if (!env.USE_CLIENT_TRANSCRIPT) {
+            const skippedClientTranscript = await db.transcript.findUnique({
+              where: { recordingId },
+              select: { text: true },
+            });
+            if (skippedClientTranscript?.text?.trim()) {
+              log('Ignoring client on-device transcript — using cloud STT for language accuracy');
+            }
+          }
           // Step 3b: Server-side transcription (cloud fallback).
           const recordingMeta = await db.recording.findUnique({
             where: { id: recordingId },
@@ -169,7 +191,7 @@ export function startTranscriptionWorker(): Worker<
 
           log('Transcribing audio via cloud provider');
           transcriptionResult = shouldChunkTranscription
-            ? await transcribeInChunks(downloadUrl, normalizedMime, log)
+            ? await transcribeInChunks(downloadUrl, normalizedMime, log, transcriptionOptions)
             : env.ENABLE_FFMPEG_TRANSCODE &&
                 (normalizedMime === 'audio/webm' || normalizedMime === 'audio/ogg')
               ? await withTempTranscodeToWav16kMono(
@@ -177,13 +199,10 @@ export function startTranscriptionWorker(): Worker<
                   async ({ buffer, mimeType: outMime }) =>
                     transcribe(
                       { type: 'buffer', data: buffer, mimeType: outMime },
-                      { punctuate: true, diarize: false }
+                      transcriptionOptions
                     )
                 )
-              : await transcribe(
-                  { type: 'url', url: downloadUrl, mimeType },
-                  { punctuate: true, diarize: false }
-                );
+              : await transcribe({ type: 'url', url: downloadUrl, mimeType }, transcriptionOptions);
         }
 
         log(
@@ -408,7 +427,8 @@ export function startTranscriptionWorker(): Worker<
 async function transcribeInChunks(
   downloadUrl: string,
   inputMimeType: string,
-  log: (msg: string) => void
+  log: (msg: string) => void,
+  transcriptionOptions: TranscriptionOptions
 ): Promise<{
   text: string;
   segments: Array<{
@@ -438,7 +458,7 @@ async function transcribeInChunks(
         confidence?: number;
       }> = [];
       let totalDuration = 0;
-      let language = 'en';
+      let language = transcriptionOptions.language ?? 'und';
       let modelName: string | undefined;
       let chunkCount = 0;
 
@@ -447,7 +467,7 @@ async function transcribeInChunks(
         log(`Transcribing chunk ${chunk.index + 1}`);
         const result = await transcribe(
           { type: 'buffer', data: chunk.buffer, mimeType: chunk.mimeType },
-          { punctuate: true, diarize: false }
+          transcriptionOptions
         );
 
         if (result.text.trim()) {

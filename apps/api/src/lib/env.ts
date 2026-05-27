@@ -53,6 +53,13 @@ const envSchema = z.object({
   ANTHROPIC_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
   TRANSCRIPTION_PROVIDER: z.enum(['deepgram', 'openai', 'whisper-local', 'mock']).default('openai'),
+  /** ISO 639-1 hint (e.g. ko, hi). Omit to let the provider auto-detect. */
+  TRANSCRIPTION_LANGUAGE: z
+    .string()
+    .regex(/^[a-z]{2}(-[A-Z]{2})?$/)
+    .optional(),
+  /** When false, ignore iOS on-device transcripts and always use cloud STT. */
+  USE_CLIENT_TRANSCRIPT: z.coerce.boolean().default(false),
   DEBRIEF_PROVIDER: z.enum(['openai', 'claude']).default('claude'),
   DEEPGRAM_API_KEY: z.string().min(1).optional(),
 

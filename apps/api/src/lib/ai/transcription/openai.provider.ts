@@ -10,10 +10,10 @@ import { getEnv } from '../../env.js';
 
 /**
  * OpenAI Whisper Transcription Provider
- * 
+ *
  * Uses OpenAI's hosted Whisper model for transcription.
  * Good accuracy but no speaker diarization support.
- * 
+ *
  * @see https://platform.openai.com/docs/guides/speech-to-text
  */
 export class OpenAIWhisperProvider implements TranscriptionProvider {
@@ -83,7 +83,7 @@ export class OpenAIWhisperProvider implements TranscriptionProvider {
     return {
       text: response.text,
       segments,
-      language: response.language ?? options.language ?? 'en',
+      language: response.language ?? options.language ?? 'und',
       duration: response.duration,
       metadata: {
         model: 'whisper-1',
