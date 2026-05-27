@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { View, StyleSheet, ActivityIndicator } from 'react-native';
-import TwinLogo from './components/TwinLogo';
+import { View, StyleSheet } from 'react-native';
+import AnimatedSplash from './components/AnimatedSplash';
 
 // Auth
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -234,32 +234,25 @@ function AppStack() {
   );
 }
 
-// ─── Splash ──────────────────────────────────────────────────
-
-function SplashScreen() {
-  return (
-    <View style={styles.splash}>
-      <TwinLogo size={140} />
-      <ActivityIndicator size="large" color="#0ff" style={{ marginTop: 24 }} />
-    </View>
-  );
-}
-
 // ─── Root ────────────────────────────────────────────────────
 
 function RootNavigator() {
   const { user, loading: authLoading } = useAuth();
 
-  if (authLoading) return <SplashScreen />;
-  if (!user) return <AuthStack />;
-
-  // User is signed in — wrap in ConsentProvider and show ConsentGate
   return (
-    <SubscriptionProvider>
-      <ConsentProvider>
-        <ConsentGate />
-      </ConsentProvider>
-    </SubscriptionProvider>
+    <View style={styles.root}>
+      <View style={styles.content}>
+        {!authLoading && !user && <AuthStack />}
+        {!authLoading && user && (
+          <SubscriptionProvider>
+            <ConsentProvider>
+              <ConsentGate />
+            </ConsentProvider>
+          </SubscriptionProvider>
+        )}
+      </View>
+      <AnimatedSplash active={authLoading} />
+    </View>
   );
 }
 
@@ -273,26 +266,36 @@ function ConsentGate() {
   const [showPrivacyPolicy, setShowPrivacyPolicy] = React.useState(false);
   const [showTermsOfService, setShowTermsOfService] = React.useState(false);
 
-  if (consentLoading) return <SplashScreen />;
-  if (!hasConsent) {
-    // If showing legal pages from consent screen, render them
-    if (showPrivacyPolicy) {
-      return <PrivacyPolicyScreen onBack={() => setShowPrivacyPolicy(false)} />;
+  const renderContent = () => {
+    if (consentLoading) return null;
+
+    if (!hasConsent) {
+      if (showPrivacyPolicy) {
+        return <PrivacyPolicyScreen onBack={() => setShowPrivacyPolicy(false)} />;
+      }
+      if (showTermsOfService) {
+        return <TermsOfServiceScreen onBack={() => setShowTermsOfService(false)} />;
+      }
+      return (
+        <ConsentScreen
+          onPrivacyPolicy={() => setShowPrivacyPolicy(true)}
+          onTermsOfService={() => setShowTermsOfService(true)}
+        />
+      );
     }
-    if (showTermsOfService) {
-      return <TermsOfServiceScreen onBack={() => setShowTermsOfService(false)} />;
-    }
+
     return (
-      <ConsentScreen
-        onPrivacyPolicy={() => setShowPrivacyPolicy(true)}
-        onTermsOfService={() => setShowTermsOfService(true)}
-      />
+      <RecordingProvider>
+        <AppStack />
+      </RecordingProvider>
     );
-  }
+  };
+
   return (
-    <RecordingProvider>
-      <AppStack />
-    </RecordingProvider>
+    <View style={styles.root}>
+      <View style={styles.content}>{renderContent()}</View>
+      <AnimatedSplash active={consentLoading} />
+    </View>
   );
 }
 
@@ -310,15 +313,12 @@ export default function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: '#0a0908',
+  },
+  root: {
+    flex: 1,
   },
   content: {
     flex: 1,
-  },
-  splash: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#000',
   },
 });
