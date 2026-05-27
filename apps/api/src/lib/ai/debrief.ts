@@ -1,6 +1,7 @@
-import { generateText } from 'ai';
+import { generateObject, generateText } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import type { DebriefSection } from '@twin/shared';
+import { z } from 'zod';
 import { getEnv } from '../env.js';
 
 // ============================================
@@ -12,16 +13,18 @@ export interface DebriefResult {
   sections: DebriefSection[];
 }
 
-interface DebriefAnalysis {
-  situation: string;
-  emotionalDynamics: string;
-  turningPoints: string[];
-  whatTheUserMayBeMissing: string;
-  ambiguities: string;
-  adviceStance: 'none' | 'light' | 'direct';
-  tone: string;
-  keyQuotes: string[];
-}
+const debriefAnalysisSchema = z.object({
+  situation: z.string(),
+  emotionalDynamics: z.string(),
+  turningPoints: z.array(z.string()),
+  whatTheUserMayBeMissing: z.string(),
+  ambiguities: z.string(),
+  adviceStance: z.enum(['none', 'light', 'direct']),
+  tone: z.string(),
+  keyQuotes: z.array(z.string()),
+});
+
+type DebriefAnalysis = z.infer<typeof debriefAnalysisSchema>;
 
 const TRANSCRIPT_CHARS_PER_SUMMARY_CHUNK = 16000;
 const DIRECT_DEBRIEF_CHAR_LIMIT = 24000;
@@ -101,6 +104,7 @@ Writing rules:
 - If advice is warranted, keep it secondary and minimal
 - If no advice is warranted, do not invent any
 - End with a line that leaves the thought open, not a sign-off
+- Write the debrief in the same language as the transcript (Korean transcript -> Korean debrief)
 
 The goal is not to make the user feel coached. The goal is to make them feel accurately understood.`;
 
@@ -118,34 +122,27 @@ function getModeContext(mode: string): string {
   return MODE_CONTEXTS[mode] ?? MODE_CONTEXTS.general;
 }
 
-function parseDebriefAnalysis(raw: string): DebriefAnalysis {
-  const start = raw.indexOf('{');
-  const end = raw.lastIndexOf('}');
+function extractJsonPayload(raw: string): string {
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = (fenced?.[1] ?? raw).trim();
+  const start = candidate.indexOf('{');
+  const end = candidate.lastIndexOf('}');
   if (start === -1 || end === -1 || end <= start) {
     throw new Error('Debrief analysis did not return JSON');
   }
+  return candidate.slice(start, end + 1);
+}
 
-  const parsed = JSON.parse(raw.slice(start, end + 1)) as Partial<DebriefAnalysis>;
-  return {
-    situation: typeof parsed.situation === 'string' ? parsed.situation : '',
-    emotionalDynamics: typeof parsed.emotionalDynamics === 'string' ? parsed.emotionalDynamics : '',
-    turningPoints: Array.isArray(parsed.turningPoints)
-      ? parsed.turningPoints.filter((value): value is string => typeof value === 'string')
-      : [],
-    whatTheUserMayBeMissing:
-      typeof parsed.whatTheUserMayBeMissing === 'string' ? parsed.whatTheUserMayBeMissing : '',
-    ambiguities: typeof parsed.ambiguities === 'string' ? parsed.ambiguities : '',
-    adviceStance:
-      parsed.adviceStance === 'none' ||
-      parsed.adviceStance === 'light' ||
-      parsed.adviceStance === 'direct'
-        ? parsed.adviceStance
-        : 'none',
-    tone: typeof parsed.tone === 'string' ? parsed.tone : '',
-    keyQuotes: Array.isArray(parsed.keyQuotes)
-      ? parsed.keyQuotes.filter((value): value is string => typeof value === 'string')
-      : [],
-  };
+function parseDebriefAnalysis(raw: string): DebriefAnalysis {
+  const parsed = debriefAnalysisSchema.parse(JSON.parse(extractJsonPayload(raw)));
+  return parsed;
+}
+
+function buildAnalysisUserPrompt(transcriptText: string, mode: string, title: string): string {
+  return (
+    `Recording title: "${title}"\nMode: "${mode}"\nMode context: ${getModeContext(mode)}\n\n` +
+    `Transcript:\n${transcriptText}`
+  );
 }
 
 async function analyzeTranscript(
@@ -153,19 +150,31 @@ async function analyzeTranscript(
   mode: string,
   title: string
 ): Promise<DebriefAnalysis> {
+  const userContent = buildAnalysisUserPrompt(transcriptText, mode, title);
+
+  try {
+    const { object } = await generateObject({
+      model: getClaudeModel('claude-haiku-4-5'),
+      schema: debriefAnalysisSchema,
+      system: ANALYSIS_SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: userContent }],
+      temperature: 0.2,
+      maxOutputTokens: 1500,
+    });
+    return object;
+  } catch (structuredError) {
+    console.warn(
+      '[Debrief] Structured analysis failed, falling back to text parsing:',
+      structuredError
+    );
+  }
+
   const { text } = await generateText({
     model: getClaudeModel('claude-haiku-4-5'),
     system: ANALYSIS_SYSTEM_PROMPT,
-    messages: [
-      {
-        role: 'user',
-        content:
-          `Recording title: "${title}"\nMode: "${mode}"\nMode context: ${getModeContext(mode)}\n\n` +
-          `Transcript:\n${transcriptText}`,
-      },
-    ],
+    messages: [{ role: 'user', content: userContent }],
     temperature: 0.2,
-    maxOutputTokens: 800,
+    maxOutputTokens: 1500,
   });
 
   if (!text) throw new Error('No content in debrief analysis response');
