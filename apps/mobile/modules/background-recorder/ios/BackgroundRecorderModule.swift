@@ -25,6 +25,12 @@ final class BackgroundAudioRecorder: NSObject, AVAudioRecorderDelegate {
   private var rotationIntervalSec: TimeInterval = 0
   private var nextPartIndex: Int = 1
 
+  // Tracks whether we're inside an AVAudioSession interruption. While true,
+  // audioRecorderDidFinishRecording should not attempt recovery — the session
+  // is suspended and any new recorder will fail to start. The .ended handler
+  // resumes properly once the session is available again.
+  private var isInterrupted = false
+
   // Callbacks fired back to the Expo module which forwards them as events.
   // (uri, partIndex) for rotated chunks.
   var onChunkRotated: ((String, Int) -> Void)?
@@ -114,8 +120,13 @@ final class BackgroundAudioRecorder: NSObject, AVAudioRecorderDelegate {
 
   /// Builds a new AVAudioRecorder and starts it. Caller updates `isRecording`.
   /// Returns the URL the recorder is writing to.
+  ///
+  /// Always re-activates the audio session before creating the recorder so this
+  /// method is safe to call from recovery paths (e.g. after an interruption has
+  /// deactivated the session).
   @discardableResult
   private func beginRecording() throws -> URL {
+    try configureAudioSession()
     let url = newRecordingURL()
     let rec = try AVAudioRecorder(url: url, settings: recorderSettings())
     rec.delegate = self
@@ -272,7 +283,10 @@ final class BackgroundAudioRecorder: NSObject, AVAudioRecorderDelegate {
   }
 
   func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
-    if isRecording && !flag {
+    // During a known interruption the session is suspended — any recovery attempt
+    // would fail immediately. Let handleInterruption(.ended) restart recording once
+    // the session is available again.
+    if isRecording && !flag && !isInterrupted {
       onError?("Recording finished unexpectedly — attempting restart")
       attemptRecovery()
     }
@@ -294,10 +308,13 @@ final class BackgroundAudioRecorder: NSObject, AVAudioRecorderDelegate {
     try session.setActive(true, options: .notifyOthersOnDeactivation)
   }
 
+  /// When AVAudioRecorder stops unexpectedly, rotate to a new file instead of
+  /// discarding the finished chunk. `rotateChunkInternal` fires `onChunkRotated`
+  /// so JS can upload the saved audio before continuing capture.
   private func attemptRecovery() {
     guard isRecording else { return }
     do {
-      _ = try beginRecording()
+      _ = try rotateChunkInternal()
     } catch {
       isRecording = false
       rotationTimer?.invalidate()
@@ -327,15 +344,20 @@ final class BackgroundAudioRecorder: NSObject, AVAudioRecorderDelegate {
 
     switch type {
     case .began:
-      break
+      // Mark interrupted so audioRecorderDidFinishRecording doesn't try to
+      // recover while the session is still suspended.
+      isInterrupted = true
 
     case .ended:
+      isInterrupted = false
       guard let optionsValue = info[AVAudioSessionInterruptionOptionKey] as? UInt else { return }
       let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
       if options.contains(.shouldResume) && isRecording {
         do {
-          try configureAudioSession()
-          recorder?.record()
+          // Rotate: save whatever audio was captured before the interruption as
+          // a completed chunk, then start a fresh file. beginRecording() inside
+          // rotateChunkInternal() re-activates the session itself.
+          _ = try rotateChunkInternal()
         } catch {
           onError?("Failed to resume after interruption: \(error.localizedDescription)")
         }
@@ -363,14 +385,31 @@ final class BackgroundAudioRecorder: NSObject, AVAudioRecorderDelegate {
 
   @objc private func handleMediaServicesReset() {
     guard isRecording else { return }
+
+    rotationTimer?.invalidate()
+    rotationTimer = nil
+
+    recorder?.stop()
+    let finishedURI = currentFileURL?.absoluteString ?? ""
+    let finishedPart = nextPartIndex
+    if !finishedURI.isEmpty {
+      nextPartIndex += 1
+    }
     recorder = nil
     currentFileURL = nil
-    isRecording = false
+
     do {
       try configureAudioSession()
       _ = try beginRecording()
       isRecording = true
+      if !finishedURI.isEmpty {
+        onChunkRotated?(finishedURI, finishedPart)
+      }
+      if rotationIntervalSec > 0 {
+        scheduleRotationTimer()
+      }
     } catch {
+      isRecording = false
       onError?("Media services reset — recovery failed: \(error.localizedDescription)")
     }
   }
@@ -379,13 +418,13 @@ final class BackgroundAudioRecorder: NSObject, AVAudioRecorderDelegate {
     guard isRecording else { return }
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
       guard let self = self, self.isRecording else { return }
+      guard let rec = self.recorder, !rec.isRecording else { return }
+      // Recorder stalled while moving to background — rotate to a fresh file so
+      // the audio captured so far is preserved and upload can proceed.
       do {
-        try self.configureAudioSession()
-        if let rec = self.recorder, !rec.isRecording {
-          rec.record()
-        }
+        _ = try self.rotateChunkInternal()
       } catch {
-        self.attemptRecovery()
+        self.onError?("Background recorder restart failed: \(error.localizedDescription)")
       }
     }
   }

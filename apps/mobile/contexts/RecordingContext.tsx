@@ -21,14 +21,18 @@ import * as FileSystem from 'expo-file-system/legacy';
 import {
   startRecording as nativeStart,
   stopRecording as nativeStop,
+  addChunkRotatedListener,
   addRecorderErrorListener,
   requestSpeechAuthorization,
 } from 'background-recorder';
 import {
   createRecording,
+  createSession,
   completeUpload,
   getRecordingStatus,
+  getSession,
   retryTranscription,
+  triggerSessionDebrief,
   getMe,
   ApiClientError,
 } from '@twin/shared';
@@ -38,6 +42,8 @@ import { getExpoPublicEnv } from '../lib/expoPublicEnv';
 const MIC_EXPLAINED_KEY = 'twin_mic_permission_explained';
 const STALE_RECORDING_KEY = 'twin:stale_recording';
 const KEEP_AWAKE_TAG = 'twin-recording';
+/** Native rotates every 10 min so at most one segment is at risk if iOS stops the file. */
+const NATIVE_CHUNK_ROTATION_SEC = 10 * 60;
 
 export type RecordingPhase =
   | 'idle'
@@ -105,6 +111,9 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
   const pollCancelledRef = useRef(false);
   const maxRecordingDurationSecRef = useRef<number | null>(null);
   const autoStopTriggeredRef = useRef(false);
+  const sessionIdRef = useRef<string | null>(null);
+  const chunkUploadPromisesRef = useRef<Promise<void>[]>([]);
+  const firstRecordingIdRef = useRef<string | null>(null);
 
   // Load mic-explainer flag once
   useEffect(() => {
@@ -257,8 +266,12 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
         setCurrentRecordingId(null);
         setUploadProgress('');
 
-        // One recording stays one file: chunk rotation is disabled.
-        const uri = await nativeStart(0);
+        const session = await createSession(userId, `Recording ${new Date().toLocaleString()}`);
+        sessionIdRef.current = session.sessionId;
+        firstRecordingIdRef.current = null;
+        chunkUploadPromisesRef.current = [];
+
+        const uri = await nativeStart(NATIVE_CHUNK_ROTATION_SEC);
 
         recordingStartTimeRef.current = Date.now();
         isRecordingRef.current = true;
@@ -283,15 +296,136 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
     [micExplainerSeen, requestPermission, userId]
   );
 
-  // Subscribe to native recorder errors.
+  // Subscribe to native recorder errors and chunk rotation (recovery + timer).
   useEffect(() => {
     const errorSub = addRecorderErrorListener((event) => {
       console.warn('Recorder error:', event.message);
     });
+
+    const chunkSub = addChunkRotatedListener(({ uri, partIndex }) => {
+      const sessionId = sessionIdRef.current;
+      if (!sessionId || !userId) return;
+
+      const uploadPromise = (async () => {
+        try {
+          await uploadRecordingFile(uri, {
+            sessionId,
+            chunkIndex: partIndex,
+          });
+        } catch (err) {
+          if (err instanceof ApiClientError && err.statusCode === 402) {
+            setError(err.error || err.code || 'audio_minutes_limit_reached');
+            setPhase('error');
+            return;
+          }
+          console.error('Chunk upload failed:', err);
+        }
+      })();
+
+      chunkUploadPromisesRef.current.push(uploadPromise);
+    });
+
     return () => {
       errorSub.remove();
+      chunkSub.remove();
     };
-  }, []);
+  }, [uploadRecordingFile, userId]);
+
+  const uploadRecordingFile = useCallback(
+    async (
+      fileUri: string,
+      opts: {
+        sessionId?: string;
+        chunkIndex?: number;
+        title?: string;
+      } = {}
+    ): Promise<string> => {
+      if (!userId) throw new Error('Not signed in');
+
+      const extension = fileUri.split('.').pop()?.toLowerCase();
+      const mimeType = extension === 'caf' ? 'audio/x-caf' : 'audio/m4a';
+
+      const createResult = await createRecording(userId, {
+        title: opts.title ?? `Recording ${new Date().toLocaleTimeString()}`,
+        mode: 'general',
+        mimeType,
+        sessionId: opts.sessionId,
+        chunkIndex: opts.chunkIndex,
+      });
+
+      if (opts.chunkIndex === 1 || firstRecordingIdRef.current == null) {
+        firstRecordingIdRef.current = createResult.recordingId;
+      }
+
+      const fileInfo = await FileSystem.getInfoAsync(fileUri);
+      const fileSize = fileInfo.exists
+        ? ((fileInfo as { size?: number }).size ?? undefined)
+        : undefined;
+
+      const headers: Record<string, string> = {};
+      if (createResult.requiredHeaders) {
+        Object.assign(headers, createResult.requiredHeaders);
+      } else if (createResult.contentType) {
+        headers['Content-Type'] = createResult.contentType;
+      } else {
+        headers['Content-Type'] = mimeType;
+      }
+
+      try {
+        const resp = await FileSystem.uploadAsync(createResult.uploadUrl, fileUri, {
+          httpMethod: 'PUT',
+          headers,
+          uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+          sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
+        });
+
+        if (resp.status < 200 || resp.status >= 300) {
+          throw new Error(`Upload failed: ${resp.status}\n${resp.body || ''}`);
+        }
+      } catch (presignedErr) {
+        console.error('Presigned upload failed, trying direct API:', presignedErr);
+
+        const directUploadHeaders: Record<string, string> = {
+          'Content-Type': mimeType,
+        };
+        try {
+          const idToken = await user?.getIdToken();
+          if (idToken) {
+            directUploadHeaders['Authorization'] = `Bearer ${idToken}`;
+          }
+        } catch {
+          // Keep the error surface on the upload request itself.
+        }
+        if (__DEV__) {
+          directUploadHeaders['x-user-id'] = userId;
+        }
+
+        const apiBaseUrl = getExpoPublicEnv(
+          'EXPO_PUBLIC_API_BASE_URL',
+          'https://twin-production-a0e4.up.railway.app'
+        );
+
+        const direct = await FileSystem.uploadAsync(
+          `${apiBaseUrl}/api/recordings/${createResult.recordingId}/upload`,
+          fileUri,
+          {
+            httpMethod: 'POST',
+            headers: directUploadHeaders,
+            uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
+            sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
+          }
+        );
+
+        if (direct.status < 200 || direct.status >= 300) {
+          throw new Error(`Direct upload failed: ${direct.status}\n${direct.body || ''}`);
+        }
+      }
+
+      await completeUpload(userId, createResult.recordingId, { fileSize });
+      return createResult.recordingId;
+    },
+    [user, userId]
+  );
 
   const pollForCompletion = useCallback(
     async (id: string) => {
@@ -345,6 +479,51 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
     [userId]
   );
 
+  const pollSessionForCompletion = useCallback(
+    async (sessionId: string) => {
+      if (!userId) return;
+      setPhase('processing');
+      setUploadProgress('Processing your recording...');
+
+      let attempts = 0;
+      const maxAttempts = 180;
+      const baseDelay = 2000;
+
+      while (attempts < maxAttempts) {
+        if (pollCancelledRef.current) return;
+        try {
+          const result = await getSession(userId, sessionId);
+          if (pollCancelledRef.current) return;
+          setUploadProgress(
+            `Processing... (${result.completeCount}/${result.recordingCount} parts)`
+          );
+
+          if (result.status === 'complete') {
+            setUploadProgress('Complete!');
+            setPhase('complete');
+            setLastCompletedRecordingId(firstRecordingIdRef.current);
+            return;
+          }
+          if (result.status === 'failed') {
+            throw new Error('Session processing failed.');
+          }
+
+          const delay = Math.min(baseDelay * Math.pow(2, Math.floor(attempts / 5)), 30000);
+          await new Promise((r) => setTimeout(r, delay));
+          attempts++;
+        } catch (err) {
+          if (pollCancelledRef.current) return;
+          throw err;
+        }
+      }
+
+      if (pollCancelledRef.current) return;
+      setError('Processing is taking longer than expected. You can check status later.');
+      setPhase('error');
+    },
+    [userId]
+  );
+
   const uploadFlow = useCallback(
     async (fileUri: string) => {
       if (!userId) return;
@@ -352,98 +531,15 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
         AsyncStorage.removeItem(STALE_RECORDING_KEY).catch(() => {});
 
         setPhase('uploading');
-        setUploadProgress('Creating recording...');
-
-        const extension = fileUri.split('.').pop()?.toLowerCase();
-        const mimeType = extension === 'caf' ? 'audio/x-caf' : 'audio/m4a';
-
-        const createResult = await createRecording(userId, {
-          title: `Recording ${new Date().toLocaleTimeString()}`,
-          mode: 'general',
-          mimeType,
-        });
-
-        setCurrentRecordingId(createResult.recordingId);
         setUploadProgress('Uploading audio...');
 
-        const fileInfo = await FileSystem.getInfoAsync(fileUri);
-        const fileSize = fileInfo.exists
-          ? ((fileInfo as { size?: number }).size ?? undefined)
-          : undefined;
-
-        try {
-          const headers: Record<string, string> = {};
-          if (createResult.requiredHeaders) {
-            Object.assign(headers, createResult.requiredHeaders);
-          } else if (createResult.contentType) {
-            headers['Content-Type'] = createResult.contentType;
-          } else {
-            headers['Content-Type'] = mimeType;
-          }
-
-          const resp = await FileSystem.uploadAsync(createResult.uploadUrl, fileUri, {
-            httpMethod: 'PUT',
-            headers,
-            uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-            sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
-          });
-
-          if (resp.status < 200 || resp.status >= 300) {
-            throw new Error(`Upload failed: ${resp.status}\n${resp.body || ''}`);
-          }
-          setUploadProgress('Upload complete, processing...');
-        } catch (presignedErr) {
-          console.error('Presigned upload failed, trying direct API:', presignedErr);
-
-          const directUploadHeaders: Record<string, string> = {
-            'Content-Type': mimeType,
-          };
-          try {
-            const idToken = await user?.getIdToken();
-            if (idToken) {
-              directUploadHeaders['Authorization'] = `Bearer ${idToken}`;
-            }
-          } catch {
-            // Keep the error surface on the upload request itself.
-          }
-          if (__DEV__) {
-            directUploadHeaders['x-user-id'] = userId;
-          }
-
-          const apiBaseUrl = getExpoPublicEnv(
-            'EXPO_PUBLIC_API_BASE_URL',
-            'https://twin-production-a0e4.up.railway.app'
-          );
-
-          const direct = await FileSystem.uploadAsync(
-            `${apiBaseUrl}/api/recordings/${createResult.recordingId}/upload`,
-            fileUri,
-            {
-              httpMethod: 'POST',
-              headers: directUploadHeaders,
-              uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-              sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
-            }
-          );
-
-          if (direct.status < 200 || direct.status >= 300) {
-            throw new Error(`Direct upload failed: ${direct.status}\n${direct.body || ''}`);
-          }
-          setUploadProgress('Upload complete, processing...');
-        }
-
-        // Cloud STT on the worker handles transcription with proper language detection.
-        // On-device iOS recognition was locked to en-US and produced garbled text for
-        // other languages, so we no longer send a client transcript here.
+        const recordingId = await uploadRecordingFile(fileUri);
+        setCurrentRecordingId(recordingId);
         setUploadProgress('Upload complete, processing...');
-
-        await completeUpload(userId, createResult.recordingId, {
-          fileSize,
-        });
 
         resetRecordingLimits();
         setPhase('processing');
-        await pollForCompletion(createResult.recordingId);
+        await pollForCompletion(recordingId);
       } catch (err) {
         if (err instanceof ApiClientError && err.statusCode === 402) {
           setError(err.error || err.code || 'audio_minutes_limit_reached');
@@ -461,11 +557,14 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
         setPhase('error');
       }
     },
-    [pollForCompletion, resetRecordingLimits, user, userId]
+    [pollForCompletion, resetRecordingLimits, uploadRecordingFile, userId]
   );
 
   const stop = useCallback(async () => {
     if (!isRecordingRef.current) return;
+
+    const sessionId = sessionIdRef.current;
+    if (!userId || !sessionId) return;
 
     try {
       setPhase('stopping');
@@ -479,15 +578,36 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
       if (!result) throw new Error('No recording URI returned');
 
       deactivateKeepAwake(KEEP_AWAKE_TAG);
-      resetRecordingLimits();
+      await AsyncStorage.removeItem(STALE_RECORDING_KEY).catch(() => {});
 
-      await uploadFlow(result.uri);
+      setPhase('uploading');
+      setUploadProgress('Uploading audio...');
+
+      await Promise.all(chunkUploadPromisesRef.current);
+      chunkUploadPromisesRef.current = [];
+
+      const recordingId = await uploadRecordingFile(result.uri, {
+        sessionId,
+        chunkIndex: result.partIndex,
+      });
+      setCurrentRecordingId(recordingId);
+
+      resetRecordingLimits();
+      sessionIdRef.current = null;
+
+      setUploadProgress('Processing your recording...');
+      await triggerSessionDebrief(userId, sessionId);
+      await pollSessionForCompletion(sessionId);
     } catch (err) {
       console.error('Error stopping recording:', err);
-      setError(err instanceof Error ? err.message : 'Failed to stop recording');
+      if (err instanceof ApiClientError && err.statusCode === 402) {
+        setError(err.error || err.code || 'audio_minutes_limit_reached');
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to stop recording');
+      }
       setPhase('error');
     }
-  }, [resetRecordingLimits, uploadFlow]);
+  }, [pollSessionForCompletion, resetRecordingLimits, uploadRecordingFile, userId]);
 
   useEffect(() => {
     if (phase !== 'recording') return;
@@ -522,6 +642,9 @@ export function RecordingProvider({ children }: { children: React.ReactNode }) {
 
     deactivateKeepAwake(KEEP_AWAKE_TAG);
     resetRecordingLimits();
+    sessionIdRef.current = null;
+    chunkUploadPromisesRef.current = [];
+    firstRecordingIdRef.current = null;
     await AsyncStorage.removeItem(STALE_RECORDING_KEY).catch(() => {});
 
     setPhase('idle');
