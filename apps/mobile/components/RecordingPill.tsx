@@ -54,7 +54,7 @@ export default function RecordingPill({ onTap }: RecordingPillProps) {
 const styles = StyleSheet.create({
   pill: {
     position: 'absolute',
-    bottom: 80,
+    bottom: 100,
     alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',

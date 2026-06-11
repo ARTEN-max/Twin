@@ -11,7 +11,7 @@
  * - Persists messages locally with AsyncStorage
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -24,7 +24,6 @@ import {
   Platform,
   AppState,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import {
   listRecordings,
@@ -38,25 +37,9 @@ import { useAuth } from '../contexts/AuthContext';
 import { theme } from '../theme';
 
 const STORAGE_BASE = `${FileSystem.documentDirectory}twin_chat/`;
-const CHAT_DATE_KEY = 'twin:chat_date';
 
 function todayString(): string {
   return new Date().toISOString().split('T')[0];
-}
-
-function offsetDate(dateStr: string, days: number): string {
-  const d = new Date(dateStr + 'T00:00:00');
-  d.setDate(d.getDate() + days);
-  return d.toISOString().split('T')[0];
-}
-
-function formatDate(dateStr: string): string {
-  const today = todayString();
-  const yesterday = offsetDate(today, -1);
-  if (dateStr === today) return 'Today';
-  if (dateStr === yesterday) return 'Yesterday';
-  const d = new Date(dateStr + 'T00:00:00');
-  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
 const ensureStorageDir = async (uid: string) => {
@@ -87,7 +70,7 @@ interface DailyContext {
   }>;
 }
 
-export default function ChatScreen({ onBack: _onBack, onPaywall }: ChatScreenProps) {
+export default function ChatScreen({ onBack, onPaywall }: ChatScreenProps) {
   const { user } = useAuth();
   const userId = user!.uid;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -96,27 +79,9 @@ export default function ChatScreen({ onBack: _onBack, onPaywall }: ChatScreenPro
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dailyContext, setDailyContext] = useState<DailyContext>({ recordings: [] });
-  const [selectedDate, setSelectedDate] = useState<string>(todayString);
   const flatListRef = useRef<FlatList>(null);
-  // Refs so callbacks always see latest values without stale closures
-  const selectedDateRef = useRef(selectedDate);
-  selectedDateRef.current = selectedDate;
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
-
-  // Restore last-viewed chat date on mount, but never a future date
-  useEffect(() => {
-    AsyncStorage.getItem(CHAT_DATE_KEY).then((saved) => {
-      if (saved && saved <= todayString()) {
-        setSelectedDate(saved);
-      }
-    });
-  }, []);
-
-  const changeDate = useCallback((newDate: string) => {
-    setSelectedDate(newDate);
-    AsyncStorage.setItem(CHAT_DATE_KEY, newDate);
-  }, []);
 
   const getStoragePath = (date: string) => `${STORAGE_BASE}${userId}/${date}.json`;
 
@@ -245,22 +210,20 @@ export default function ChatScreen({ onBack: _onBack, onPaywall }: ChatScreenPro
     }
   };
 
-  // Reset and reload when userId or selectedDate changes
   useEffect(() => {
     setMessages([]);
     setDailyContext({ recordings: [] });
     setInputText('');
     setError(null);
     setLoading(true);
-    ensureStorageDir(userId).then(() => loadChatData(selectedDateRef.current));
-  }, [userId, selectedDate]);
+    ensureStorageDir(userId).then(() => loadChatData(todayString()));
+  }, [userId]);
 
-  // Poll for proactive openers (today only)
-  // Use messagesRef so this effect doesn't recreate the interval on every message
+  // Poll for proactive openers
   useEffect(() => {
     const interval = setInterval(async () => {
-      const date = selectedDateRef.current;
-      if (sending || date !== todayString()) return;
+      if (sending) return;
+      const date = todayString();
       try {
         const session = await getChatSession(userId, date);
         if (session.messages && session.messages.length > messagesRef.current.length) {
@@ -275,12 +238,11 @@ export default function ChatScreen({ onBack: _onBack, onPaywall }: ChatScreenPro
     return () => clearInterval(interval);
   }, [userId, sending]);
 
-  // Refresh on foreground (today only)
-  // Use messagesRef so this effect doesn't re-subscribe on every message
+  // Refresh on foreground
   useEffect(() => {
     const sub = AppState.addEventListener('change', (nextState) => {
-      const date = selectedDateRef.current;
-      if (nextState === 'active' && !sending && date === todayString()) {
+      if (nextState === 'active' && !sending) {
+        const date = todayString();
         getChatSession(userId, date)
           .then(async (session) => {
             if (session.messages && session.messages.length > messagesRef.current.length) {
@@ -301,7 +263,7 @@ export default function ChatScreen({ onBack: _onBack, onPaywall }: ChatScreenPro
     const text = inputText.trim();
     if (!text || sending) return;
 
-    const date = selectedDateRef.current;
+    const date = todayString();
 
     const userMessage: ChatMessage = {
       id: `user-${Date.now()}`,
@@ -402,7 +364,7 @@ export default function ChatScreen({ onBack: _onBack, onPaywall }: ChatScreenPro
       if (err instanceof ApiClientError) {
         if (err.statusCode === 503 && err.message.includes('OPENAI_API_KEY')) {
           errorMessage = 'AI service unavailable. Please configure OPENAI_API_KEY.';
-          setTimeout(() => loadChatData(selectedDateRef.current), 500);
+          setTimeout(() => loadChatData(todayString()), 500);
         } else {
           errorMessage = `API Error: ${err.message}${err.statusCode ? ` (${err.statusCode})` : ''}`;
         }
@@ -440,15 +402,11 @@ export default function ChatScreen({ onBack: _onBack, onPaywall }: ChatScreenPro
     if (dailyContext.recordings.length === 0) {
       return (
         <View style={styles.emptyState}>
-          <Text style={styles.emptyStateTitle}>
-            {selectedDate === todayString()
-              ? 'Record something to unlock your daily context.'
-              : `No recordings for ${formatDate(selectedDate)}.`}
-          </Text>
+          <Text style={styles.emptyStateTitle}>Record something first</Text>
           <Text style={styles.emptyStateText}>
-            {selectedDate === todayString()
-              ? "Once you have recordings with transcripts and debriefs, I'll be able to help you reflect on your day."
-              : 'Use the arrows to navigate to a day with recordings.'}
+            {
+              "Once you have recordings with transcripts and debriefs, I'll be able to help you reflect on your day."
+            }
           </Text>
         </View>
       );
@@ -463,27 +421,16 @@ export default function ChatScreen({ onBack: _onBack, onPaywall }: ChatScreenPro
     );
   };
 
-  const isToday = selectedDate === todayString();
-
   const renderHeader = () => (
     <View style={styles.header}>
-      <View style={styles.dateNav}>
-        <TouchableOpacity
-          style={styles.navArrow}
-          onPress={() => changeDate(offsetDate(selectedDate, -1))}
-        >
-          <Text style={styles.navArrowText}>‹</Text>
+      {onBack && (
+        <TouchableOpacity style={styles.backButton} onPress={onBack}>
+          <Text style={styles.backButtonText}>‹</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{formatDate(selectedDate)}</Text>
-        <TouchableOpacity
-          style={[styles.navArrow, isToday && styles.navArrowDisabled]}
-          disabled={isToday}
-          onPress={() => {
-            if (!isToday) changeDate(offsetDate(selectedDate, 1));
-          }}
-        >
-          <Text style={[styles.navArrowText, isToday && styles.navArrowTextDisabled]}>›</Text>
-        </TouchableOpacity>
+      )}
+      <View style={styles.headerTitleWrap}>
+        <Text style={styles.headerTitle}>Chat</Text>
+        <Text style={styles.headerSubtitle}>Today's context</Text>
       </View>
     </View>
   );
@@ -514,7 +461,7 @@ export default function ChatScreen({ onBack: _onBack, onPaywall }: ChatScreenPro
       {error && (
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity onPress={() => loadChatData(selectedDate)} style={styles.retryButton}>
+          <TouchableOpacity onPress={() => loadChatData(todayString())} style={styles.retryButton}>
             <Text style={styles.retryButtonText}>Retry</Text>
           </TouchableOpacity>
         </View>
@@ -566,40 +513,41 @@ const styles = StyleSheet.create({
     backgroundColor: theme.bg,
   },
   header: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 8,
     paddingTop: 60,
     paddingBottom: 14,
     backgroundColor: theme.surface,
     borderBottomWidth: 1,
     borderBottomColor: theme.border,
+    gap: 4,
   },
-  dateNav: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  navArrow: {
+  backButton: {
     width: 44,
-    height: 40,
+    height: 44,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  navArrowDisabled: {
-    opacity: 0.2,
-  },
-  navArrowText: {
+  backButtonText: {
     fontSize: 28,
     color: theme.textPrimary,
     lineHeight: 32,
   },
-  navArrowTextDisabled: {
-    color: theme.textMuted,
+  headerTitleWrap: {
+    flex: 1,
   },
   headerTitle: {
     fontFamily: theme.fontDisplay,
     fontSize: 26,
     color: theme.textPrimary,
     letterSpacing: 0.3,
+  },
+  headerSubtitle: {
+    fontFamily: theme.fontMono,
+    fontSize: 11,
+    color: theme.textMuted,
+    marginTop: 1,
   },
   loadingContainer: {
     flex: 1,

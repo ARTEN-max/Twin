@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import AnimatedSplash from './components/AnimatedSplash';
 
 // Auth
@@ -27,7 +27,6 @@ import PrivacyPolicyScreen from './screens/PrivacyPolicyScreen';
 import TermsOfServiceScreen from './screens/TermsOfServiceScreen';
 import PaywallScreen from './screens/PaywallScreen';
 
-import TabBar, { type Tab } from './components/TabBar';
 import RecordingPill from './components/RecordingPill';
 import type { RootStackParamList, AuthStackParamList } from './navigation/types';
 
@@ -66,7 +65,6 @@ type Screen = keyof RootStackParamList;
 type ScreenParams = RootStackParamList[Screen];
 
 function AppStack() {
-  const [currentTab, setCurrentTab] = useState<Tab>('Today');
   const [currentScreen, setCurrentScreen] = useState<Screen>('Recordings');
   const [paywallReason, setPaywallReason] = useState<string | undefined>();
   const [screenParams, setScreenParams] = useState<ScreenParams>(undefined);
@@ -82,17 +80,6 @@ function AppStack() {
     navigate('Paywall');
   };
 
-  const handleTabChange = (tab: Tab) => {
-    setCurrentTab(tab);
-    if (tab === 'Today') {
-      setCurrentScreen('Recordings');
-      setScreenParams(undefined);
-    } else if (tab === 'Chat') {
-      setCurrentScreen('Chat');
-      setScreenParams(undefined);
-    }
-  };
-
   const handleRecordingComplete = (recordingId: string) => {
     navigate('RecordingDetail', { recordingId });
     if (recordingsRefreshRef.current) {
@@ -102,8 +89,8 @@ function AppStack() {
     }
   };
 
-  const showTabBar = currentScreen === 'Recordings' || currentScreen === 'Chat';
   const showRecordingPill = currentScreen !== 'NewRecording';
+  const showChatFab = currentScreen === 'Recordings';
 
   const renderScreen = () => {
     switch (currentScreen) {
@@ -120,7 +107,12 @@ function AppStack() {
           />
         );
       case 'Chat':
-        return <ChatScreen onPaywall={(reason) => showPaywall(reason)} />;
+        return (
+          <ChatScreen
+            onBack={() => navigate('Recordings')}
+            onPaywall={(reason) => showPaywall(reason)}
+          />
+        );
       case 'RecordingDetail':
         if (screenParams && 'recordingId' in screenParams) {
           return (
@@ -128,7 +120,6 @@ function AppStack() {
               recordingId={screenParams.recordingId}
               onBack={() => {
                 navigate('Recordings');
-                setCurrentTab('Today');
               }}
               onDeleted={() => {
                 // Refresh recordings list after deletion
@@ -146,7 +137,6 @@ function AppStack() {
             onComplete={handleRecordingComplete}
             onCancel={() => {
               navigate('Recordings');
-              setCurrentTab('Today');
             }}
             onPaywall={(reason) => showPaywall(reason)}
           />
@@ -156,7 +146,6 @@ function AppStack() {
           <VoiceProfileScreen
             onBack={() => {
               navigate('Recordings');
-              setCurrentTab('Today');
             }}
             onPaywall={() => showPaywall('voice_reenroll')}
           />
@@ -167,7 +156,6 @@ function AppStack() {
             reason={paywallReason}
             onClose={() => {
               navigate('Recordings');
-              setCurrentTab('Today');
             }}
           />
         );
@@ -176,7 +164,6 @@ function AppStack() {
           <SettingsScreen
             onBack={() => {
               navigate('Recordings');
-              setCurrentTab('Today');
             }}
             onDataConsent={() => navigate('DataConsent')}
             onPrivacyPolicy={() => navigate('PrivacyPolicy')}
@@ -229,7 +216,17 @@ function AppStack() {
     <>
       <View style={styles.content}>{renderScreen()}</View>
       {showRecordingPill && <RecordingPill onTap={() => navigate('NewRecording')} />}
-      {showTabBar && <TabBar activeTab={currentTab} onTabChange={handleTabChange} />}
+      {showChatFab && (
+        <TouchableOpacity
+          style={styles.chatFab}
+          onPress={() => navigate('Chat')}
+          activeOpacity={0.85}
+          accessibilityLabel="Open Chat"
+        >
+          <View style={styles.chatFabBubble} />
+          <View style={styles.chatFabTail} />
+        </TouchableOpacity>
+      )}
     </>
   );
 }
@@ -320,5 +317,44 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  chatFab: {
+    position: 'absolute',
+    bottom: 32,
+    right: 20,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#C9A84C',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#C9A84C',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.45,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  chatFabBubble: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    right: 10,
+    bottom: 16,
+    borderRadius: 8,
+    backgroundColor: '#0a0908',
+    opacity: 0.85,
+  },
+  chatFabTail: {
+    position: 'absolute',
+    bottom: 10,
+    left: 14,
+    width: 0,
+    height: 0,
+    borderStyle: 'solid',
+    borderLeftWidth: 7,
+    borderTopWidth: 7,
+    borderLeftColor: 'transparent',
+    borderTopColor: '#0a0908',
+    opacity: 0.85,
   },
 });

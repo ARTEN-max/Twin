@@ -1,16 +1,4 @@
-/**
- * RecordingsScreen
- *
- * Displays a list of recordings for a selected date.
- * Features:
- * - Date picker (defaults to today)
- * - List of recordings (most recent first)
- * - Pull-to-refresh
- * - Empty state
- * - Navigation to detail screen
- */
-
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -20,7 +8,6 @@ import {
   RefreshControl,
   ActivityIndicator,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   listRecordings,
   type RecordingSummary,
@@ -30,17 +17,45 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { theme } from '../theme';
 
-const DATE_KEY = 'twin:selected_date';
 type RecordingApiItem = Parameters<typeof toRecordingSummary>[0];
+
+type FeedItem =
+  | { type: 'date-header'; date: string; key: string }
+  | { type: 'recording'; data: RecordingSummary; key: string };
 
 function todayString(): string {
   return new Date().toISOString().split('T')[0];
 }
 
-function offsetDate(dateStr: string, days: number): string {
-  const d = new Date(dateStr + 'T00:00:00');
-  d.setDate(d.getDate() + days);
-  return d.toISOString().split('T')[0];
+function formatDateLabel(dateStr: string): string {
+  const today = todayString();
+  const d = new Date(today + 'T00:00:00');
+  d.setDate(d.getDate() - 1);
+  const yesterday = d.toISOString().split('T')[0];
+  if (dateStr === today) return 'Today';
+  if (dateStr === yesterday) return 'Yesterday';
+  return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+  });
+}
+
+function buildFeedItems(recordings: RecordingSummary[]): FeedItem[] {
+  const sorted = [...recordings].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+  const items: FeedItem[] = [];
+  let lastDate = '';
+  for (const rec of sorted) {
+    const date = rec.createdAt.split('T')[0];
+    if (date !== lastDate) {
+      items.push({ type: 'date-header', date, key: `header-${date}` });
+      lastDate = date;
+    }
+    items.push({ type: 'recording', data: rec, key: rec.id });
+  }
+  return items;
 }
 
 interface RecordingsScreenProps {
@@ -63,59 +78,29 @@ export default function RecordingsScreen({
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedDate, setSelectedDate] = useState<string>(todayString);
 
-  // Restore last-viewed date on mount, but never a future date
-  useEffect(() => {
-    AsyncStorage.getItem(DATE_KEY).then((saved) => {
-      if (saved && saved <= todayString()) {
-        setSelectedDate(saved);
-      }
-    });
-  }, []);
-
-  const changeDate = useCallback((newDate: string) => {
-    setSelectedDate(newDate);
-    AsyncStorage.setItem(DATE_KEY, newDate);
-  }, []);
+  const feedItems = useMemo(() => buildFeedItems(recordings), [recordings]);
 
   const loadRecordings = useCallback(
-    async (date: string, showRefreshing = false) => {
+    async (showRefreshing = false) => {
       if (!user?.uid) {
-        setRecordings([]);
         setLoading(false);
         setRefreshing(false);
         setError('Please sign in again to load recordings.');
         return;
       }
-
       try {
-        if (showRefreshing) {
-          setRefreshing(true);
-        } else {
-          setLoading(true);
-        }
+        if (showRefreshing) setRefreshing(true);
+        else setLoading(true);
         setError(null);
 
-        const response = await listRecordings(user.uid, {
-          date,
-          limit: 50, // Load enough for a day
-        });
-
-        // Convert API response to RecordingSummary
-        // Response structure: { data: Recording[], pagination: {...} }
-        // handleResponse now returns the full PaginatedResponse for paginated endpoints
+        const response = await listRecordings(user.uid, { limit: 100 });
         const recordingsArray = response?.data || [];
-        if (!Array.isArray(recordingsArray)) {
-          console.error('Unexpected response format:', response);
-          throw new Error('Invalid response format: expected array in data field');
-        }
-        const summaries = recordingsArray.map((recording: RecordingApiItem) =>
-          toRecordingSummary(recording)
+        const summaries = (recordingsArray as unknown as RecordingApiItem[]).map((r) =>
+          toRecordingSummary(r)
         );
         setRecordings(summaries);
       } catch (err) {
-        console.error('Error loading recordings:', err);
         const errorMessage =
           err instanceof ApiClientError
             ? `API Error: ${err.message} (${err.statusCode})`
@@ -132,49 +117,21 @@ export default function RecordingsScreen({
   );
 
   useEffect(() => {
-    loadRecordings(selectedDate);
-  }, [selectedDate, loadRecordings]);
+    loadRecordings();
+  }, [loadRecordings]);
 
-  // Expose refresh function to parent (for when returning from NewRecording)
   useEffect(() => {
-    if (onMount) {
-      onMount(() => {
-        loadRecordings(selectedDate, false);
-      });
-    }
-  }, [onMount, loadRecordings, selectedDate]);
+    if (onMount) onMount(() => loadRecordings(true));
+  }, [onMount, loadRecordings]);
 
-  const onRefresh = useCallback(() => {
-    loadRecordings(selectedDate, true);
-  }, [selectedDate, loadRecordings]);
+  const onRefresh = useCallback(() => loadRecordings(true), [loadRecordings]);
 
-  const formatTime = (isoString: string): string => {
-    const date = new Date(isoString);
-    return date.toLocaleTimeString('en-US', {
+  const formatTime = (isoString: string): string =>
+    new Date(isoString).toLocaleTimeString('en-US', {
       hour: 'numeric',
       minute: '2-digit',
       hour12: true,
     });
-  };
-
-  const formatDate = (dateStr: string): string => {
-    const date = new Date(dateStr + 'T00:00:00');
-    const today = new Date();
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-
-    if (dateStr === today.toISOString().split('T')[0]) {
-      return 'Today';
-    } else if (dateStr === yesterday.toISOString().split('T')[0]) {
-      return 'Yesterday';
-    } else {
-      return date.toLocaleDateString('en-US', {
-        weekday: 'long',
-        month: 'long',
-        day: 'numeric',
-      });
-    }
-  };
 
   const formatDuration = (seconds: number | null): string => {
     if (!seconds) return '--:--';
@@ -211,16 +168,21 @@ export default function RecordingsScreen({
     }
   };
 
-  const renderRecordingItem = ({ item }: { item: RecordingSummary }) => (
+  const renderDateHeader = (date: string) => (
+    <View style={styles.dateHeader}>
+      <Text style={styles.dateHeaderText}>{formatDateLabel(date)}</Text>
+      <View style={styles.dateHeaderLine} />
+    </View>
+  );
+
+  const renderRecordingItem = (item: RecordingSummary) => (
     <TouchableOpacity
       style={styles.recordingItem}
       onPress={() => onSelectRecording(item.id)}
       activeOpacity={0.75}
     >
-      {/* Left accent bar */}
       <View style={[styles.recordingAccentBar, { backgroundColor: getStatusColor(item.status) }]} />
       <View style={styles.recordingItemContent}>
-        {/* Top row: time + status */}
         <View style={styles.recordingItemHeader}>
           <Text style={styles.recordingTime}>{formatTime(item.createdAt)}</Text>
           <View style={styles.statusRow}>
@@ -230,13 +192,9 @@ export default function RecordingsScreen({
             </Text>
           </View>
         </View>
-
-        {/* Title */}
         <Text style={styles.recordingTitle} numberOfLines={1}>
           {item.title || 'Untitled recording'}
         </Text>
-
-        {/* Meta row: duration + badges */}
         <View style={styles.recordingItemMeta}>
           <Text style={styles.recordingDuration}>{formatDuration(item.durationSec)}</Text>
           {item.hasTranscript && (
@@ -256,6 +214,11 @@ export default function RecordingsScreen({
     </TouchableOpacity>
   );
 
+  const renderItem = ({ item }: { item: FeedItem }) => {
+    if (item.type === 'date-header') return renderDateHeader(item.date);
+    return renderRecordingItem(item.data);
+  };
+
   const renderEmptyState = () => (
     <View style={styles.emptyState}>
       <View style={styles.emptyWaveform}>
@@ -264,11 +227,7 @@ export default function RecordingsScreen({
         ))}
       </View>
       <Text style={styles.emptyStateTitle}>No recordings yet</Text>
-      <Text style={styles.emptyStateText}>
-        {formatDate(selectedDate) === 'Today'
-          ? 'Tap + to capture your first recording today'
-          : `No recordings for ${formatDate(selectedDate)}`}
-      </Text>
+      <Text style={styles.emptyStateText}>Tap + to capture your first recording</Text>
     </View>
   );
 
@@ -276,15 +235,21 @@ export default function RecordingsScreen({
     return (
       <View style={styles.container}>
         <View style={styles.header}>
-          <View style={styles.dateLabelWrap}>
-            <Text style={styles.headerTitle}>{formatDate(selectedDate)}</Text>
-            <Text style={styles.headerDate}>
-              {new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-US', {
-                weekday: 'long',
-                month: 'long',
-                day: 'numeric',
-              })}
-            </Text>
+          <Text style={styles.headerTitle}>Twin</Text>
+          <View style={styles.headerButtons}>
+            {onSettings && (
+              <TouchableOpacity style={styles.iconButton} onPress={onSettings}>
+                <Text style={styles.iconButtonText}>⚙</Text>
+              </TouchableOpacity>
+            )}
+            {onVoiceProfile && (
+              <TouchableOpacity style={styles.iconButton} onPress={onVoiceProfile}>
+                <Text style={styles.iconButtonText}>🎙</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity style={styles.newButton} onPress={onNewRecording}>
+              <Text style={styles.newButtonText}>+</Text>
+            </TouchableOpacity>
           </View>
         </View>
         <View style={styles.loadingContainer}>
@@ -297,42 +262,7 @@ export default function RecordingsScreen({
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <View style={styles.dateNav}>
-          <TouchableOpacity
-            style={styles.navArrow}
-            onPress={() => changeDate(offsetDate(selectedDate, -1))}
-            accessibilityLabel="Previous day"
-          >
-            <Text style={styles.navArrowText}>‹</Text>
-          </TouchableOpacity>
-          <View style={styles.dateLabelWrap}>
-            <Text style={styles.headerTitle}>{formatDate(selectedDate)}</Text>
-            <Text style={styles.headerDate}>
-              {new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-US', {
-                weekday: 'long',
-                month: 'long',
-                day: 'numeric',
-              })}
-            </Text>
-          </View>
-          <TouchableOpacity
-            style={[styles.navArrow, selectedDate >= todayString() && styles.navArrowDisabled]}
-            onPress={() => {
-              if (selectedDate < todayString()) changeDate(offsetDate(selectedDate, 1));
-            }}
-            accessibilityLabel="Next day"
-            disabled={selectedDate >= todayString()}
-          >
-            <Text
-              style={[
-                styles.navArrowText,
-                selectedDate >= todayString() && styles.navArrowTextDisabled,
-              ]}
-            >
-              ›
-            </Text>
-          </TouchableOpacity>
-        </View>
+        <Text style={styles.headerTitle}>Twin</Text>
         <View style={styles.headerButtons}>
           {onSettings && (
             <TouchableOpacity
@@ -368,10 +298,10 @@ export default function RecordingsScreen({
         </View>
       ) : (
         <FlatList
-          data={recordings}
-          renderItem={renderRecordingItem}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={recordings.length === 0 ? styles.emptyList : undefined}
+          data={feedItems}
+          renderItem={renderItem}
+          keyExtractor={(item) => item.key}
+          contentContainerStyle={feedItems.length === 0 ? styles.emptyList : styles.listContent}
           ListEmptyComponent={renderEmptyState}
           refreshControl={
             <RefreshControl
@@ -395,48 +325,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     paddingTop: 60,
     paddingBottom: 16,
     backgroundColor: theme.surface,
     borderBottomWidth: 1,
     borderBottomColor: theme.border,
   },
-  dateNav: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  dateLabelWrap: {
-    flex: 1,
-  },
-  navArrow: {
-    width: 32,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  navArrowDisabled: {
-    opacity: 0.25,
-  },
-  navArrowText: {
-    fontSize: 28,
-    color: theme.textPrimary,
-    lineHeight: 32,
-  },
-  navArrowTextDisabled: {
-    color: theme.textMuted,
-  },
   headerTitle: {
     fontFamily: theme.fontDisplay,
     fontSize: 30,
     color: theme.textPrimary,
-  },
-  headerDate: {
-    fontFamily: theme.fontMono,
-    fontSize: 11,
-    color: theme.textMuted,
-    marginTop: 2,
+    letterSpacing: 0.5,
   },
   headerButtons: {
     flexDirection: 'row',
@@ -487,6 +387,9 @@ const styles = StyleSheet.create({
     color: theme.error,
     fontSize: 13,
   },
+  listContent: {
+    paddingBottom: 120,
+  },
   emptyList: {
     flexGrow: 1,
   },
@@ -520,12 +423,31 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20,
   },
-  // Recording list item — card style
+  dateHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 24,
+    paddingBottom: 8,
+    gap: 12,
+  },
+  dateHeaderText: {
+    fontFamily: theme.fontMono,
+    fontSize: 11,
+    color: theme.textMuted,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+  dateHeaderLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: theme.border,
+  },
   recordingItem: {
     flexDirection: 'row',
     alignItems: 'center',
     marginHorizontal: 16,
-    marginTop: 10,
+    marginBottom: 8,
     backgroundColor: theme.surface,
     borderRadius: 12,
     borderWidth: 1,
