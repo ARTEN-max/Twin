@@ -1,0 +1,1235 @@
+/* global fetch, Response, RequestInit, URLSearchParams, setTimeout, clearTimeout, AbortController, TextDecoder, Blob, FormData, File, console, process */
+/**
+ * Shared API Client for Mobile and Web
+ *
+ * Provides typed wrappers around fetch for the Twin API.
+ * All endpoint strings are centralized here.
+ */
+
+import type {
+  Recording,
+  TranscriptSegment,
+  ApiError,
+  ApiResponse,
+  PaginatedResponse,
+} from './types/index.js';
+
+function shouldLogDebug(): boolean {
+  const maybeDev = (globalThis as { __DEV__?: boolean }).__DEV__;
+  if (typeof maybeDev === 'boolean') {
+    return maybeDev;
+  }
+  return typeof process !== 'undefined' ? process.env?.NODE_ENV !== 'production' : false;
+}
+
+function logDebug(message: string, payload?: unknown): void {
+  if (!shouldLogDebug() || typeof console === 'undefined' || !console.log) return;
+  if (payload === undefined) {
+    console.log(message);
+  } else {
+    console.log(message, payload);
+  }
+}
+
+function warnDebug(message: string, payload?: unknown): void {
+  if (!shouldLogDebug() || typeof console === 'undefined' || !console.warn) return;
+  if (payload === undefined) {
+    console.warn(message);
+  } else {
+    console.warn(message, payload);
+  }
+}
+
+// ============================================
+// Configuration
+// ============================================
+
+const getBaseUrl = (): string => {
+  // Check process.env (works in both development and built Expo apps)
+  // Expo bakes EXPO_PUBLIC_ variables from app.json into process.env at build time
+  // This is the recommended way and avoids module resolution issues
+  if (typeof process !== 'undefined') {
+    if (process.env?.EXPO_PUBLIC_API_BASE_URL) {
+      const url = process.env.EXPO_PUBLIC_API_BASE_URL;
+      logDebug('[API Client] Using API URL from process.env:', url);
+      return url;
+    }
+    if (process.env?.NEXT_PUBLIC_API_URL) {
+      const url = process.env.NEXT_PUBLIC_API_URL;
+      logDebug('[API Client] Using API URL from NEXT_PUBLIC_API_URL:', url);
+      return url;
+    }
+  }
+
+  // For browser environments
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if (typeof globalThis !== 'undefined' && 'window' in globalThis && (globalThis as any).window) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const win = (globalThis as any).window;
+    if (win?.__API_BASE_URL__) {
+      logDebug('[API Client] Using API URL from window.__API_BASE_URL__:', win.__API_BASE_URL__);
+      return win.__API_BASE_URL__;
+    }
+  }
+
+  // Default fallback - use Railway URL for production
+  const fallbackUrl = 'https://twin-production-a0e4.up.railway.app';
+  warnDebug('[API Client] No API URL found in env, using fallback:', fallbackUrl);
+  return fallbackUrl;
+};
+
+// ============================================
+// Auth Token Provider
+// ============================================
+
+/**
+ * Function that returns the current Firebase ID token (or null).
+ * `forceRefresh` can be used after a 401 to request a fresh token from Firebase.
+ * Set this once from AuthProvider so every request is authenticated.
+ */
+type TokenProvider = (forceRefresh?: boolean) => Promise<string | null>;
+
+let _tokenProvider: TokenProvider | null = null;
+
+function shouldSendLegacyUserIdHeader(): boolean {
+  const maybeDev = (globalThis as { __DEV__?: boolean }).__DEV__;
+  if (typeof maybeDev === 'boolean') {
+    return maybeDev;
+  }
+  return typeof process !== 'undefined' ? process.env?.NODE_ENV !== 'production' : false;
+}
+
+function buildUserHeaders(
+  userId: string,
+  extraHeaders: Record<string, string> = {}
+): Record<string, string> {
+  return shouldSendLegacyUserIdHeader() ? { ...extraHeaders, 'x-user-id': userId } : extraHeaders;
+}
+
+/**
+ * Configure a token provider for automatic Authorization header injection.
+ * Pass `null` to clear (e.g. on sign-out).
+ */
+export function setTokenProvider(provider: TokenProvider | null): void {
+  _tokenProvider = provider;
+}
+
+async function attachAuthHeader(
+  headers: Record<string, string>,
+  forceRefresh = false
+): Promise<boolean> {
+  if (_tokenProvider || headers['Authorization'] || headers['authorization']) {
+    if (_tokenProvider && !headers['Authorization'] && !headers['authorization']) {
+      try {
+        const token = await _tokenProvider(forceRefresh);
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+          return true;
+        }
+        warnDebug('[API Client] Token provider returned no auth token', { forceRefresh });
+      } catch {
+        // Token retrieval failed – continue without auth header
+      }
+    }
+    return !!headers['Authorization'] || !!headers['authorization'];
+  }
+
+  warnDebug('[API Client] No token provider configured for request');
+  return false;
+}
+
+// ============================================
+// Error Handling
+// ============================================
+
+export class ApiClientError extends Error {
+  public code?: string;
+
+  constructor(
+    message: string,
+    public statusCode?: number,
+    public error?: string,
+    code?: string
+  ) {
+    super(message);
+    this.name = 'ApiClientError';
+    this.code = code;
+  }
+}
+
+async function handleResponse<T>(response: Response): Promise<T> {
+  const contentType = response.headers.get('content-type');
+  const isJson = contentType?.includes('application/json');
+
+  if (!response.ok) {
+    let errorMessage = `Request failed with status ${response.status}`;
+    let errorCode: string | undefined;
+    let errorBody: string | undefined;
+
+    if (isJson) {
+      try {
+        const errorData = (await response.json()) as
+          | ApiError
+          | { error?: string; message?: string };
+        errorMessage = errorData.message || errorData.error || errorMessage;
+        errorCode = 'error' in errorData ? errorData.error : undefined;
+        errorBody = JSON.stringify(errorData);
+      } catch {
+        // Fallback to status text
+        errorMessage = response.statusText || errorMessage;
+      }
+    } else {
+      try {
+        errorBody = await response.clone().text();
+        errorMessage = response.statusText || errorMessage;
+      } catch {
+        errorMessage = response.statusText || errorMessage;
+      }
+    }
+
+    // Log detailed error for debugging
+    console.error('[API Client] Request failed:', {
+      status: response.status,
+      statusText: response.statusText,
+      url: response.url,
+      errorMessage,
+      errorCode,
+      errorBody: errorBody?.substring(0, 500), // Limit to first 500 chars
+      headers: Object.fromEntries(response.headers.entries()),
+    });
+
+    throw new ApiClientError(errorMessage, response.status, errorCode);
+  }
+
+  if (isJson) {
+    const data = (await response.json()) as ApiResponse<T> | PaginatedResponse<T> | T;
+    // Handle { data: T, success: true } responses
+    if (typeof data === 'object' && data !== null && 'data' in data && 'success' in data) {
+      // Check if it's a PaginatedResponse (has pagination field)
+      if ('pagination' in data) {
+        // Return the full PaginatedResponse, not just data
+        return data as T;
+      }
+      // Regular ApiResponse - extract data field
+      return (data as ApiResponse<T>).data;
+    }
+    return data as T;
+  }
+
+  // For non-JSON responses, return response as-is (shouldn't happen for our API)
+  return response as unknown as T;
+}
+
+// ============================================
+// Request Helpers
+// ============================================
+
+async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const baseUrl = getBaseUrl();
+  const url = endpoint.startsWith('http') ? endpoint : `${baseUrl}${endpoint}`;
+
+  // Debug logging in development
+  logDebug('[API Client] Request:', { method: options.method || 'GET', url, baseUrl });
+
+  // Only set Content-Type for requests that have a body
+  const hasBody = options.body !== undefined && options.body !== null;
+  const headers: Record<string, string> = {
+    ...(options.headers as Record<string, string>),
+  };
+
+  // Only set Content-Type if we have a body and it's not already set
+  if (hasBody && !headers['Content-Type'] && !headers['content-type']) {
+    headers['Content-Type'] = 'application/json';
+  }
+
+  const autoAttachedAuth = await attachAuthHeader(headers);
+  logDebug('[API Client] Auth header status:', {
+    hasAuth: !!headers['Authorization'] || !!headers['authorization'],
+    autoAttachedAuth,
+  });
+
+  // Add timeout to prevent long hangs (10 seconds)
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+  try {
+    let response = await fetch(url, {
+      ...options,
+      headers,
+      signal: controller.signal,
+    });
+
+    if (response.status === 401 && autoAttachedAuth && _tokenProvider) {
+      warnDebug(
+        '[API Client] Request returned 401 after sending auth header; retrying with refreshed token'
+      );
+      const retryHeaders: Record<string, string> = {
+        ...(options.headers as Record<string, string>),
+      };
+      if (hasBody && !retryHeaders['Content-Type'] && !retryHeaders['content-type']) {
+        retryHeaders['Content-Type'] = 'application/json';
+      }
+      const refreshedAuth = await attachAuthHeader(retryHeaders, true);
+      if (refreshedAuth) {
+        response = await fetch(url, {
+          ...options,
+          headers: retryHeaders,
+          signal: controller.signal,
+        });
+      }
+    } else if (response.status === 401) {
+      warnDebug('[API Client] Request returned 401 without an attached auth header', {
+        hasTokenProvider: !!_tokenProvider,
+      });
+    }
+
+    clearTimeout(timeoutId);
+    return handleResponse<T>(response);
+  } catch (error: unknown) {
+    clearTimeout(timeoutId);
+    if ((error as { name?: string }).name === 'AbortError') {
+      throw new ApiClientError(
+        'Request timed out. Please check your network connection.',
+        0,
+        'TIMEOUT'
+      );
+    }
+    throw error;
+  }
+}
+
+// ============================================
+// API Functions
+// ============================================
+
+export interface CreateRecordingParams {
+  title: string;
+  mode?: 'general' | 'sales' | 'interview' | 'meeting';
+  mimeType: string;
+  sessionId?: string;
+  chunkIndex?: number;
+}
+
+export interface CreateRecordingResponse {
+  recordingId: string;
+  uploadUrl: string;
+  objectKey: string;
+  expiresIn: number;
+  // Optional: backend may return these for presigned URL requirements
+  contentType?: string;
+  requiredHeaders?: Record<string, string>;
+}
+
+/**
+ * Create a new recording and get presigned upload URL
+ */
+export async function createRecording(
+  userId: string,
+  params: CreateRecordingParams
+): Promise<CreateRecordingResponse> {
+  return apiRequest<CreateRecordingResponse>('/api/recordings', {
+    method: 'POST',
+    headers: buildUserHeaders(userId),
+    body: JSON.stringify({
+      title: params.title,
+      mode: params.mode || 'general',
+      mimeType: params.mimeType,
+      ...(params.sessionId != null && { sessionId: params.sessionId }),
+      ...(params.chunkIndex != null && { chunkIndex: params.chunkIndex }),
+    }),
+  });
+}
+
+// ============================================
+// Session API
+// ============================================
+
+export interface CreateSessionResponse {
+  sessionId: string;
+  title: string;
+  status: string;
+}
+
+export interface SessionResponse {
+  sessionId: string;
+  title: string;
+  status: 'pending' | 'processing' | 'complete' | 'failed';
+  recordingCount: number;
+  completeCount: number;
+  totalDuration: number;
+  debrief: { markdown: string; sections: unknown[] } | null;
+  createdAt: string;
+}
+
+export interface TriggerSessionDebriefResponse {
+  status: 'pending' | 'processing' | 'complete';
+  message: string;
+  pendingCount?: number;
+  totalCount?: number;
+}
+
+/**
+ * Create a new recording session to group long-recording chunks
+ */
+export async function createSession(
+  userId: string,
+  title?: string
+): Promise<CreateSessionResponse> {
+  return apiRequest<CreateSessionResponse>('/api/sessions', {
+    method: 'POST',
+    headers: buildUserHeaders(userId),
+    body: JSON.stringify(title ? { title } : {}),
+  });
+}
+
+/**
+ * Get session status and debrief
+ */
+export async function getSession(userId: string, sessionId: string): Promise<SessionResponse> {
+  return apiRequest<SessionResponse>(`/api/sessions/${sessionId}`, {
+    headers: buildUserHeaders(userId),
+  });
+}
+
+/**
+ * Trigger session-level debrief generation.
+ * Returns 202 if some chunks are still processing — safe to retry.
+ */
+export async function triggerSessionDebrief(
+  userId: string,
+  sessionId: string
+): Promise<TriggerSessionDebriefResponse> {
+  return apiRequest<TriggerSessionDebriefResponse>(`/api/sessions/${sessionId}/debrief`, {
+    method: 'POST',
+    headers: buildUserHeaders(userId),
+    body: JSON.stringify({}),
+  });
+}
+
+export interface CompleteUploadParams {
+  fileSize?: number;
+  /**
+   * Optional client-side transcript (from iOS SFSpeechRecognizer or similar).
+   * When provided, the server skips its cloud transcription provider and uses
+   * this directly — eliminating per-minute Whisper cost.
+   */
+  transcript?: string;
+}
+
+export interface CompleteUploadResponse {
+  recordingId: string;
+  jobId: string;
+  status: string;
+  message: string;
+}
+
+/**
+ * Upload file directly to API (alternative to presigned URL)
+ * Use this when presigned URLs aren't accessible (e.g., MinIO on localhost)
+ */
+export async function uploadRecordingFile(
+  userId: string,
+  recordingId: string,
+  fileData: ArrayBuffer | Uint8Array,
+  contentType: string
+): Promise<{ success: boolean; message: string }> {
+  const baseUrl = getBaseUrl();
+  const url = `${baseUrl}/api/recordings/${recordingId}/upload`;
+
+  logDebug('[API Client] Upload request:', {
+    baseUrl,
+    url,
+    recordingId,
+    contentType,
+    fileSize: fileData.byteLength || (fileData as Uint8Array).length,
+  });
+
+  // Build headers – include auth token if available
+  const uploadHeaders: Record<string, string> = buildUserHeaders(userId, {
+    'Content-Type': contentType,
+  });
+  const hasUploadAuth = await attachAuthHeader(uploadHeaders);
+  if (hasUploadAuth) {
+    logDebug('[API Client] Auth token included in upload headers');
+  } else if (_tokenProvider) {
+    warnDebug('[API Client] No auth token available for upload');
+  } else {
+    warnDebug('[API Client] No token provider set for upload');
+  }
+
+  logDebug('[API Client] Upload headers:', {
+    'Content-Type': contentType,
+    'has-auth': !!uploadHeaders['Authorization'],
+    'has-legacy-user-id': !!uploadHeaders['x-user-id'],
+  });
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout for uploads
+
+    // React Native fetch works best with Uint8Array directly
+    // Don't convert to Blob as it may not be available in all React Native environments
+    const body = fileData instanceof Uint8Array ? fileData : new Uint8Array(fileData);
+
+    logDebug('[API Client] Starting upload fetch:', {
+      url,
+      contentType,
+      bodyType: body instanceof Uint8Array ? 'Uint8Array' : typeof body,
+      bodySize: body.length,
+      hasAuth: !!uploadHeaders['Authorization'],
+      userId: userId.substring(0, 8) + '...',
+    });
+
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: uploadHeaders,
+        body: body,
+        signal: controller.signal,
+      });
+      if (response.status === 401 && hasUploadAuth && _tokenProvider) {
+        const retryHeaders: Record<string, string> = buildUserHeaders(userId, {
+          'Content-Type': contentType,
+        });
+        const refreshedAuth = await attachAuthHeader(retryHeaders, true);
+        if (refreshedAuth) {
+          response = await fetch(url, {
+            method: 'POST',
+            headers: retryHeaders,
+            body: body,
+            signal: controller.signal,
+          });
+        }
+      }
+      logDebug('[API Client] Upload fetch completed:', {
+        status: response.status,
+        statusText: response.statusText,
+        ok: response.ok,
+      });
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+      console.error('[API Client] Fetch failed (network error):', {
+        url,
+        error: fetchError instanceof Error ? fetchError.message : String(fetchError),
+        name: fetchError instanceof Error ? fetchError.name : undefined,
+        stack: fetchError instanceof Error ? fetchError.stack : undefined,
+      });
+      throw fetchError;
+    }
+
+    clearTimeout(timeoutId);
+
+    // Log response details for debugging
+    if (!response.ok) {
+      let errorText: string;
+      try {
+        errorText = await response.clone().text();
+      } catch {
+        errorText = 'Could not read error response';
+      }
+      console.error('[API Client] Upload failed:', {
+        status: response.status,
+        statusText: response.statusText,
+        headers: Object.fromEntries(response.headers.entries()),
+        errorBody: errorText.substring(0, 500), // Limit to first 500 chars
+      });
+    }
+
+    return handleResponse<{ success: boolean; message: string }>(response);
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new ApiClientError('Upload request timed out after 60 seconds', 408);
+    }
+    if (error instanceof Error && error.message.includes('Network request failed')) {
+      console.error('[API Client] Network error details:', {
+        url,
+        baseUrl,
+        error: error.message,
+        stack: error.stack,
+      });
+      throw new ApiClientError(
+        `Cannot reach API server at ${baseUrl}. Check your internet connection and ensure the API is running.`,
+        0,
+        'NETWORK_ERROR'
+      );
+    }
+    throw error;
+  }
+}
+
+/**
+ * Mark upload as complete and start processing
+ */
+export async function completeUpload(
+  userId: string,
+  recordingId: string,
+  params?: CompleteUploadParams
+): Promise<CompleteUploadResponse> {
+  return apiRequest<CompleteUploadResponse>(`/api/recordings/${recordingId}/complete-upload`, {
+    method: 'POST',
+    headers: {
+      ...buildUserHeaders(userId),
+    },
+    body: JSON.stringify({
+      fileSize: params?.fileSize,
+      ...(params?.transcript ? { transcript: params.transcript } : {}),
+    }),
+  });
+}
+
+export interface RecordingStatusResponse {
+  id: string;
+  status: 'pending' | 'uploaded' | 'processing' | 'complete' | 'failed';
+  title: string;
+  mode: string;
+  createdAt: string;
+  updatedAt: string;
+  errorMessage?: string | null; // Error message from failed job
+}
+
+/**
+ * Get recording status
+ */
+export async function getRecordingStatus(
+  userId: string,
+  recordingId: string
+): Promise<RecordingStatusResponse> {
+  return apiRequest<RecordingStatusResponse>(`/api/recordings/${recordingId}`, {
+    method: 'GET',
+    headers: buildUserHeaders(userId),
+  });
+}
+
+export interface RecordingResultResponse extends Recording {
+  transcript?: {
+    id: string;
+    text: string;
+    segments: TranscriptSegment[] | null;
+    language: string;
+    createdAt: string;
+  } | null;
+  debrief?: {
+    id: string;
+    markdown: string;
+    sections: Array<{
+      title: string;
+      content: string;
+      order: number;
+    }>;
+    createdAt: string;
+  } | null;
+}
+
+/**
+ * Get recording with transcript and debrief (include=all)
+ */
+export async function getRecordingResult(
+  userId: string,
+  recordingId: string
+): Promise<RecordingResultResponse> {
+  return apiRequest<RecordingResultResponse>(`/api/recordings/${recordingId}?include=all`, {
+    method: 'GET',
+    headers: buildUserHeaders(userId),
+  });
+}
+
+export interface ListRecordingsByDayParams {
+  page?: number;
+  limit?: number;
+  status?: 'pending' | 'uploaded' | 'processing' | 'complete' | 'failed';
+}
+
+/**
+ * List recordings for a user (server-side filtered by day if needed)
+ * @deprecated Use listRecordings instead
+ */
+export async function listRecordingsByDay(
+  userId: string,
+  params?: ListRecordingsByDayParams
+): Promise<PaginatedResponse<Recording>> {
+  const queryParams = new URLSearchParams();
+  if (params?.page) queryParams.set('page', params.page.toString());
+  if (params?.limit) queryParams.set('limit', params.limit.toString());
+  if (params?.status) queryParams.set('status', params.status);
+
+  const query = queryParams.toString();
+  const endpoint = `/api/recordings${query ? `?${query}` : ''}`;
+
+  return apiRequest<PaginatedResponse<Recording>>(endpoint, {
+    method: 'GET',
+    headers: buildUserHeaders(userId),
+  });
+}
+
+// ============================================
+// New Recording Library API Functions
+// ============================================
+
+export interface ListRecordingsParams {
+  date?: string; // YYYY-MM-DD format
+  cursor?: string; // For cursor-based pagination
+  limit?: number;
+  status?: 'pending' | 'uploaded' | 'processing' | 'complete' | 'failed';
+}
+
+/**
+ * List recordings with date filtering and optional cursor-based pagination
+ * Includes retry logic with exponential backoff
+ */
+export async function listRecordings(
+  userId: string,
+  params?: ListRecordingsParams
+): Promise<PaginatedResponse<Recording>> {
+  const queryParams = new URLSearchParams();
+  if (params?.date) queryParams.set('date', params.date);
+  if (params?.cursor) queryParams.set('cursor', params.cursor);
+  if (params?.limit) queryParams.set('limit', params.limit.toString());
+  if (params?.status) queryParams.set('status', params.status);
+
+  const query = queryParams.toString();
+  const endpoint = `/api/recordings${query ? `?${query}` : ''}`;
+
+  // Retry logic with exponential backoff
+  let lastError: Error | null = null;
+  const maxRetries = 3;
+  const baseDelay = 1000; // 1 second
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await apiRequest<PaginatedResponse<Recording>>(endpoint, {
+        method: 'GET',
+        headers: buildUserHeaders(userId),
+      });
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      // Don't retry on client errors (4xx)
+      if (error instanceof ApiClientError && error.statusCode && error.statusCode < 500) {
+        throw error;
+      }
+
+      // Retry on server errors or network failures
+      if (attempt < maxRetries) {
+        const delay = baseDelay * Math.pow(2, attempt);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+    }
+  }
+
+  throw lastError || new Error('Failed to list recordings after retries');
+}
+
+/**
+ * Get a single recording by ID
+ * Includes retry logic with exponential backoff
+ */
+export async function getRecording(
+  userId: string,
+  recordingId: string,
+  includeAll = false
+): Promise<RecordingResultResponse> {
+  const endpoint = `/api/recordings/${recordingId}${includeAll ? '?include=all' : ''}`;
+
+  // Retry logic with exponential backoff
+  let lastError: Error | null = null;
+  const maxRetries = 3;
+  const baseDelay = 1000; // 1 second
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await apiRequest<RecordingResultResponse>(endpoint, {
+        method: 'GET',
+        headers: buildUserHeaders(userId),
+      });
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      // Don't retry on client errors (4xx)
+      if (error instanceof ApiClientError && error.statusCode && error.statusCode < 500) {
+        throw error;
+      }
+
+      // Retry on server errors or network failures
+      if (attempt < maxRetries) {
+        const delay = baseDelay * Math.pow(2, attempt);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+    }
+  }
+
+  throw lastError || new Error('Failed to get recording after retries');
+}
+
+/**
+ * Retry transcription for a failed recording
+ */
+export async function retryTranscription(
+  userId: string,
+  recordingId: string
+): Promise<{ recordingId: string; queueJobId: string; message: string }> {
+  return apiRequest<{ recordingId: string; queueJobId: string; message: string }>(
+    `/api/recordings/${recordingId}/retry-transcription`,
+    {
+      method: 'POST',
+      headers: buildUserHeaders(userId),
+    }
+  );
+}
+
+// ============================================
+// Chat API Functions
+// ============================================
+
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  createdAt: string;
+}
+
+export interface ChatSession {
+  sessionId: string;
+  sessionDate: string | null;
+  recordingId: string | null;
+  messages: ChatMessage[];
+}
+
+/**
+ * Get or create a chat session for a date
+ */
+export async function getChatSession(userId: string, date: string): Promise<ChatSession> {
+  return apiRequest<ChatSession>(`/api/chat/session?date=${date}`, {
+    method: 'GET',
+    headers: buildUserHeaders(userId),
+  });
+}
+
+export interface SendChatMessageParams {
+  messages: Array<{
+    id?: string;
+    role: 'user' | 'assistant';
+    content?: string;
+    parts?: Array<{ type: string; text: string }>;
+  }>;
+  date: string;
+}
+
+/**
+ * Send a chat message and get streaming response
+ * Returns the full response text after streaming completes
+ */
+export async function sendChatMessage(
+  userId: string,
+  params: SendChatMessageParams
+): Promise<string> {
+  if (!params || !params.messages || !Array.isArray(params.messages)) {
+    throw new Error('Messages array is required');
+  }
+
+  if (!params.messages.length) {
+    throw new Error('At least one message is required');
+  }
+
+  const baseUrl = getBaseUrl();
+  const url = `${baseUrl}/api/chat`;
+
+  // Build headers – include auth token if available
+  const chatHeaders: Record<string, string> = buildUserHeaders(userId, {
+    'Content-Type': 'application/json',
+    Accept: 'application/json', // Request JSON instead of streaming
+  });
+  const hasChatAuth = await attachAuthHeader(chatHeaders);
+
+  let response: Response;
+  try {
+    // Send messages in UIMessage format (with parts array) as expected by backend
+    // Request non-streaming response for better fetch API compatibility
+    response = await fetch(url, {
+      method: 'POST',
+      headers: chatHeaders,
+      body: JSON.stringify({
+        messages: params.messages,
+        date: params.date,
+      }),
+    });
+    if (response.status === 401 && hasChatAuth && _tokenProvider) {
+      const retryHeaders: Record<string, string> = buildUserHeaders(userId, {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      });
+      const refreshedAuth = await attachAuthHeader(retryHeaders, true);
+      if (refreshedAuth) {
+        response = await fetch(url, {
+          method: 'POST',
+          headers: retryHeaders,
+          body: JSON.stringify({
+            messages: params.messages,
+            date: params.date,
+          }),
+        });
+      }
+    }
+  } catch (fetchError) {
+    // Network error - API server likely not running
+    throw new ApiClientError(
+      `Network error: ${fetchError instanceof Error ? fetchError.message : 'Failed to connect to API server'}. Make sure the API server is running.`,
+      0,
+      'NETWORK_ERROR'
+    );
+  }
+
+  // Check response status and content type
+  const contentType = response.headers.get('content-type') || '';
+
+  if (!response.ok) {
+    let errorData: { message?: string; error?: string } = {};
+    try {
+      // Try to read error response
+      if (contentType.includes('application/json')) {
+        const text = await response.text();
+        if (text) {
+          errorData = JSON.parse(text);
+        }
+      } else {
+        const text = await response.text();
+        if (text) {
+          errorData = { message: text };
+        }
+      }
+    } catch {
+      // Ignore parse errors
+    }
+    throw new ApiClientError(
+      errorData.message || `Request failed with status ${response.status}`,
+      response.status,
+      errorData.error
+    );
+  }
+
+  // Check if this is a JSON response (non-streaming) or streaming response
+  // Accept both 'application/json' and empty content-type (Fastify defaults to JSON)
+  const isJsonResponse =
+    contentType.includes('application/json') ||
+    contentType === '' ||
+    contentType.includes('text/json');
+
+  if (isJsonResponse || !contentType.includes('text/event-stream')) {
+    // Non-streaming JSON response - much simpler!
+    try {
+      const data = (await response.json()) as { text?: string; message?: string; error?: string };
+
+      // Check for error in response
+      if (data.error) {
+        throw new ApiClientError(
+          data.message || data.error || 'Server returned an error',
+          response.status,
+          data.error
+        );
+      }
+
+      const responseText = data.text || data.message || '';
+
+      if (!responseText.trim()) {
+        throw new ApiClientError(
+          'Received empty response from server',
+          response.status,
+          'EMPTY_RESPONSE'
+        );
+      }
+
+      return responseText;
+    } catch (parseError) {
+      // If JSON parsing fails, it might be a streaming response
+      if (parseError instanceof SyntaxError) {
+        // Try to read as text to see what we got
+        const text = await response.text();
+        throw new ApiClientError(
+          `Invalid JSON response: ${text.substring(0, 100)}`,
+          response.status,
+          'INVALID_JSON'
+        );
+      }
+      throw parseError;
+    }
+  }
+
+  // Fallback to streaming for backwards compatibility
+
+  if (!response.body) {
+    throw new ApiClientError('No response body received', response.status, 'NO_BODY');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let fullText = '';
+  let buffer = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (line.trim() === '') continue;
+        if (line.startsWith('data: ')) {
+          try {
+            const jsonStr = line.slice(6).trim();
+            if (jsonStr === '[DONE]') continue;
+            const data = JSON.parse(jsonStr);
+            if (data.type === 'text-delta' && data.textDelta) {
+              fullText += data.textDelta;
+            } else if (data.type === 'text' && data.text) {
+              fullText += data.text;
+            } else if (data.textDelta) {
+              fullText += data.textDelta;
+            } else if (data.text) {
+              fullText += data.text;
+            }
+          } catch {
+            // Skip invalid JSON
+          }
+        }
+      }
+    }
+
+    if (buffer.trim()) {
+      const lines = buffer.split('\n');
+      for (const line of lines) {
+        if (line.trim() === '') continue;
+        if (line.startsWith('data: ')) {
+          try {
+            const jsonStr = line.slice(6).trim();
+            if (jsonStr === '[DONE]') continue;
+            const data = JSON.parse(jsonStr);
+            if (data.type === 'text-delta' && data.textDelta) {
+              fullText += data.textDelta;
+            } else if (data.type === 'text' && data.text) {
+              fullText += data.text;
+            } else if (data.textDelta) {
+              fullText += data.textDelta;
+            } else if (data.text) {
+              fullText += data.text;
+            }
+          } catch {
+            // Skip invalid JSON
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  if (!fullText.trim()) {
+    throw new ApiClientError(
+      'Received empty response from server',
+      response.status,
+      'EMPTY_RESPONSE'
+    );
+  }
+
+  return fullText;
+}
+
+// ============================================
+// Voice Profile API Functions
+// ============================================
+
+export interface VoiceProfileStatusResponse {
+  hasVoiceProfile: boolean;
+}
+
+/**
+ * Check if user has a voice profile
+ */
+export async function getVoiceProfileStatus(userId: string): Promise<VoiceProfileStatusResponse> {
+  return apiRequest<VoiceProfileStatusResponse>('/api/voice-profile/status', {
+    method: 'GET',
+    headers: buildUserHeaders(userId),
+  });
+}
+
+/**
+ * Enroll voice profile by uploading audio sample
+ */
+export async function enrollVoiceProfile(
+  userId: string,
+  audioBlob: Blob,
+  mimeType: string = 'audio/webm'
+): Promise<{ success: boolean; message: string; hasVoiceProfile: boolean }> {
+  const baseUrl = getBaseUrl();
+  const url = `${baseUrl}/api/voice-profile/enroll`;
+
+  const formData = new FormData();
+  const file = new File([audioBlob], 'voice-sample.webm', { type: mimeType });
+  formData.append('audio', file);
+
+  // Build headers – include auth token if available
+  const enrollHeaders: Record<string, string> = buildUserHeaders(userId);
+  const hasEnrollAuth = await attachAuthHeader(enrollHeaders);
+
+  let response = await fetch(url, {
+    method: 'POST',
+    headers: enrollHeaders,
+    body: formData,
+  });
+
+  if (response.status === 401 && hasEnrollAuth && _tokenProvider) {
+    const retryHeaders: Record<string, string> = buildUserHeaders(userId);
+    const refreshedAuth = await attachAuthHeader(retryHeaders, true);
+    if (refreshedAuth) {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: retryHeaders,
+        body: formData,
+      });
+    }
+  }
+
+  if (!response.ok) {
+    let errorMessage = 'Failed to enroll voice profile';
+    try {
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const errorData = (await response.json()) as { error?: string; message?: string };
+        errorMessage = errorData.error || errorData.message || errorMessage;
+      } else {
+        const errorText = await response.text();
+        errorMessage = errorText || errorMessage;
+      }
+    } catch {
+      errorMessage = response.statusText || errorMessage;
+    }
+    throw new ApiClientError(errorMessage, response.status);
+  }
+
+  return (await response.json()) as { success: boolean; message: string; hasVoiceProfile: boolean };
+}
+
+/**
+ * Delete voice profile
+ */
+export async function deleteVoiceProfile(
+  userId: string
+): Promise<{ success: boolean; message: string }> {
+  return apiRequest<{ success: boolean; message: string }>('/api/voice-profile', {
+    method: 'DELETE',
+    headers: buildUserHeaders(userId),
+  });
+}
+
+// ============================================
+// User Profile & Consent API Functions
+// ============================================
+
+export interface MeResponse {
+  uid: string;
+  email: string;
+  consentAcceptedAt: string | null;
+  consentRevokedAt: string | null;
+  subscription?: {
+    tier: string;
+    expiresAt: string | null;
+    limits: {
+      recordingsPerMonth: number | null;
+      maxMinutesPerRecording: number | null;
+      maxAudioMinutesPerMonth: number | null;
+      chatMessagesPerDay: number | null;
+      historyLimit: number | null;
+    };
+    usage: {
+      recordingsThisMonth: number;
+      audioMinutesThisMonth: number;
+      chatMessagesToday: number;
+    };
+  };
+}
+
+/**
+ * Get current user profile (consent status, email, uid)
+ */
+export async function getMe(userId: string): Promise<MeResponse> {
+  return apiRequest<MeResponse>('/api/me', {
+    method: 'GET',
+    headers: buildUserHeaders(userId),
+  });
+}
+
+/**
+ * Accept consent — sets consentAcceptedAt, clears consentRevokedAt
+ */
+export async function acceptConsent(userId: string): Promise<MeResponse> {
+  return apiRequest<MeResponse>('/api/me/consent/accept', {
+    method: 'POST',
+    headers: buildUserHeaders(userId),
+  });
+}
+
+/**
+ * Revoke consent — sets consentRevokedAt
+ */
+export async function revokeConsent(userId: string): Promise<MeResponse> {
+  return apiRequest<MeResponse>('/api/me/consent/revoke', {
+    method: 'POST',
+    headers: buildUserHeaders(userId),
+  });
+}
+
+/**
+ * Delete user account and all associated data
+ */
+export async function deleteAccountApi(userId: string): Promise<{ ok: boolean }> {
+  return apiRequest<{ ok: boolean }>('/api/me', {
+    method: 'DELETE',
+    headers: buildUserHeaders(userId),
+  });
+}
+
+/**
+ * Delete a single recording (with S3 + artifacts)
+ */
+export async function deleteRecordingApi(
+  userId: string,
+  recordingId: string
+): Promise<{ ok: boolean }> {
+  return apiRequest<{ ok: boolean }>(`/api/recordings/${recordingId}`, {
+    method: 'DELETE',
+    headers: buildUserHeaders(userId),
+  });
+}
+
+/**
+ * Retry debrief generation for a recording whose debrief failed
+ */
+export async function retryDebrief(
+  userId: string,
+  recordingId: string
+): Promise<{ recordingId: string; queueJobId: string; message: string }> {
+  return apiRequest<{ recordingId: string; queueJobId: string; message: string }>(
+    `/api/recordings/${recordingId}/retry-debrief`,
+    {
+      method: 'POST',
+      headers: buildUserHeaders(userId),
+    }
+  );
+}
+
+/**
+ * Register push notification token
+ */
+export async function registerPushToken(
+  _userId: string,
+  token: string
+): Promise<{ success: boolean; message: string }> {
+  return apiRequest<{ success: boolean; message: string }>('/api/me/push-token', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  });
+}

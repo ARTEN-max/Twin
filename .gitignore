@@ -10,7 +10,10 @@ build
 ios/build
 apps/mobile/ios/build
 apps/mobile/android/build
-apps/mobile/vendor-shared
+
+# vendor-shared is intentionally committed (makes mobile app self-contained for EAS builds)
+!apps/mobile/vendor-shared
+!apps/mobile/vendor-shared/**
 
 # Turbo
 .turbo

@@ -39,3 +39,7 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# vendor-shared must be committed for EAS builds (self-contained, no workspace symlinks)
+!vendor-shared/
+!vendor-shared/**

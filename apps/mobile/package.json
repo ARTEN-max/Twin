@@ -14,7 +14,7 @@
     "build:production": "eas build --platform ios --profile production"
   },
   "dependencies": {
-    "@twin/shared": "workspace:*",
+    "@twin/shared": "file:./vendor-shared",
     "@react-native-async-storage/async-storage": "^2.1.0",
     "background-recorder": "link:./modules/background-recorder",
     "expo": "~54.0.33",

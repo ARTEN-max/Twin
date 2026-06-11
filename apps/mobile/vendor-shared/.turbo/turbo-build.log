@@ -1,0 +1,44 @@
+
+> @komuchi/shared@0.0.1 build /Users/abdulrahman/Desktop/Twin-ios-compliance/Twin/packages/shared
+> tsup
+
+CLI Building entry: src/index.ts, src/models/recording.ts, src/schemas/index.ts, src/types/index.ts
+CLI Using tsconfig: tsconfig.json
+CLI tsup v8.5.1
+CLI Using tsup config: /Users/abdulrahman/Desktop/Twin-ios-compliance/Twin/packages/shared/tsup.config.ts
+CLI Target: node20
+CLI Cleaning output folder
+ESM Build start
+CJS Build start
+CJS dist/schemas/index.cjs        5.69 KB
+CJS dist/index.cjs                29.14 KB
+CJS dist/types/index.cjs          798.00 B
+CJS dist/models/recording.cjs     7.31 KB
+CJS dist/schemas/index.cjs.map    7.05 KB
+CJS dist/types/index.cjs.map      3.48 KB
+CJS dist/models/recording.cjs.map 13.41 KB
+CJS dist/index.cjs.map            58.91 KB
+CJS ⚡️ Build success in 27ms
+ESM dist/models/recording.js     372.00 B
+ESM dist/index.js                20.77 KB
+ESM dist/chunk-EW7TT2XP.js       3.25 KB
+ESM dist/chunk-6ADLA7ZV.js       2.48 KB
+ESM dist/types/index.js          33.00 B
+ESM dist/schemas/index.js        915.00 B
+ESM dist/models/recording.js.map 71.00 B
+ESM dist/index.js.map            45.37 KB
+ESM dist/chunk-EW7TT2XP.js.map   6.91 KB
+ESM dist/chunk-6ADLA7ZV.js.map   6.49 KB
+ESM dist/types/index.js.map      71.00 B
+ESM dist/schemas/index.js.map    71.00 B
+ESM ⚡️ Build success in 33ms
+DTS Build start
+DTS ⚡️ Build success in 1256ms
+DTS dist/index.d.ts             8.83 KB
+DTS dist/models/recording.d.ts  5.63 KB
+DTS dist/types/index.d.ts       2.37 KB
+DTS dist/schemas/index.d.ts     9.84 KB
+DTS dist/index.d.cts            8.84 KB
+DTS dist/models/recording.d.cts 5.63 KB
+DTS dist/types/index.d.cts      2.37 KB
+DTS dist/schemas/index.d.cts    9.84 KB

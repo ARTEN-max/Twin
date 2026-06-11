@@ -1,0 +1,75 @@
+
+> @komuchi/shared@0.0.1 lint /Users/abdulrahman/Desktop/Twin-ios-compliance/Twin/packages/shared
+> eslint . --max-warnings 0
+
+
+/Users/abdulrahman/Desktop/Twin-ios-compliance/Twin/packages/shared/src/apiClient.ts
+   25:5   error    Use "@ts-expect-error" instead of "@ts-ignore", as "@ts-ignore" will do nothing if the following line is error-free  @typescript-eslint/ban-ts-comment
+   26:9   error    'process' is not defined                                                                                             no-undef
+   27:7   error    Use "@ts-expect-error" instead of "@ts-ignore", as "@ts-ignore" will do nothing if the following line is error-free  @typescript-eslint/ban-ts-comment
+   28:19  error    'process' is not defined                                                                                             no-undef
+   29:45  error    'console' is not defined                                                                                             no-undef
+   30:9   warning  Unused eslint-disable directive (no problems were reported from 'no-console')
+   31:9   error    'console' is not defined                                                                                             no-undef
+   35:5   error    Use "@ts-expect-error" instead of "@ts-ignore", as "@ts-ignore" will do nothing if the following line is error-free  @typescript-eslint/ban-ts-comment
+   36:9   error    'process' is not defined                                                                                             no-undef
+   37:7   error    Use "@ts-expect-error" instead of "@ts-ignore", as "@ts-ignore" will do nothing if the following line is error-free  @typescript-eslint/ban-ts-comment
+   38:19  error    'process' is not defined                                                                                             no-undef
+   39:45  error    'console' is not defined                                                                                             no-undef
+   40:9   warning  Unused eslint-disable directive (no problems were reported from 'no-console')
+   41:9   error    'console' is not defined                                                                                             no-undef
+   53:45  error    'console' is not defined                                                                                             no-undef
+   54:9   warning  Unused eslint-disable directive (no problems were reported from 'no-console')
+   55:9   error    'console' is not defined                                                                                             no-undef
+   63:41  error    'console' is not defined                                                                                             no-undef
+   64:5   warning  Unused eslint-disable directive (no problems were reported from 'no-console')
+   65:5   error    'console' is not defined                                                                                             no-undef
+  109:44  error    'Response' is not defined                                                                                            no-undef
+  138:5   error    'console' is not defined                                                                                             no-undef
+  176:12  error    'RequestInit' is not defined                                                                                         no-undef
+  182:41  error    'console' is not defined                                                                                             no-undef
+  183:5   error    'console' is not defined                                                                                             no-undef
+  210:26  error    'AbortController' is not defined                                                                                     no-undef
+  211:21  error    'setTimeout' is not defined                                                                                          no-undef
+  214:28  error    'fetch' is not defined                                                                                               no-undef
+  219:5   error    'clearTimeout' is not defined                                                                                        no-undef
+  221:19  warning  Unexpected any. Specify a different type                                                                             @typescript-eslint/no-explicit-any
+  222:5   error    'clearTimeout' is not defined                                                                                        no-undef
+  298:3   error    'console' is not defined                                                                                             no-undef
+  316:9   error    'console' is not defined                                                                                             no-undef
+  318:9   error    'console' is not defined                                                                                             no-undef
+  321:7   error    'console' is not defined                                                                                             no-undef
+  324:5   error    'console' is not defined                                                                                             no-undef
+  327:3   error    'console' is not defined                                                                                             no-undef
+  334:28  error    'AbortController' is not defined                                                                                     no-undef
+  335:23  error    'setTimeout' is not defined                                                                                          no-undef
+  341:5   error    'console' is not defined                                                                                             no-undef
+  350:19  error    'Response' is not defined                                                                                            no-undef
+  352:24  error    'fetch' is not defined                                                                                               no-undef
+  358:7   error    'console' is not defined                                                                                             no-undef
+  364:7   error    'clearTimeout' is not defined                                                                                        no-undef
+  365:7   error    'console' is not defined                                                                                             no-undef
+  374:5   error    'clearTimeout' is not defined                                                                                        no-undef
+  384:7   error    'console' is not defined                                                                                             no-undef
+  398:7   error    'console' is not defined                                                                                             no-undef
+  507:27  error    'URLSearchParams' is not defined                                                                                     no-undef
+  542:27  error    'URLSearchParams' is not defined                                                                                     no-undef
+  575:40  error    'setTimeout' is not defined                                                                                          no-undef
+  619:40  error    'setTimeout' is not defined                                                                                          no-undef
+  721:17  error    'Response' is not defined                                                                                            no-undef
+  725:22  error    'fetch' is not defined                                                                                               no-undef
+  827:23  error    'TextDecoder' is not defined                                                                                         no-undef
+  929:14  error    'Blob' is not defined                                                                                                no-undef
+  935:24  error    'FormData' is not defined                                                                                            no-undef
+  936:20  error    'File' is not defined                                                                                                no-undef
+  950:26  error    'fetch' is not defined                                                                                               no-undef
+
+/Users/abdulrahman/Desktop/Twin-ios-compliance/Twin/packages/shared/src/types/index.ts
+  1:1  error  All imports in the declaration are only used as types. Use `import type`  @typescript-eslint/consistent-type-imports
+  2:1  error  All imports in the declaration are only used as types. Use `import type`  @typescript-eslint/consistent-type-imports
+
+✖ 61 problems (56 errors, 5 warnings)
+  2 errors and 4 warnings potentially fixable with the `--fix` option.
+
+ ELIFECYCLE  Command failed with exit code 1.
+ WARN   Local package.json exists, but node_modules missing, did you mean to install?
