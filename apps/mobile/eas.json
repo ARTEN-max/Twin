@@ -46,6 +46,11 @@
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {
+        "appleId": "ar362952@gmail.com",
+        "ascAppId": "6761318189"
+      }
+    }
   }
 }
