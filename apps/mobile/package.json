@@ -11,7 +11,8 @@
     "web": "expo start --web",
     "test": "jest",
     "build:preview": "eas build --platform ios --profile preview",
-    "build:production": "eas build --platform ios --profile production"
+    "build:production": "eas build --platform ios --profile production",
+    "eas-build-post-install": "cd ../.. && pnpm --filter @twin/shared build"
   },
   "dependencies": {
     "@twin/shared": "file:./vendor-shared",
