@@ -9,4 +9,11 @@
 //
 // Importing this file as the very first import in index.ts guarantees that
 // polyfillGlobal('FormData', …) runs before Expo's winter runtime is loaded.
-import 'react-native/Libraries/Core/setUpXHR';
+//
+// The `.js` extension is required: with `unstable_enablePackageExports`
+// enabled, Metro resolves this deep import against React Native's `exports`
+// map. The extensionless specifier resolves locally but fails in the EAS
+// build environment ("Unable to resolve module
+// react-native/Libraries/Core/setUpXHR"). The explicit `.js` matches RN's
+// `"./*.js"` export entry and resolves consistently in both environments.
+import 'react-native/Libraries/Core/setUpXHR.js';
