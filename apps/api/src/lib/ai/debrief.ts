@@ -104,7 +104,7 @@ Writing rules:
 - If advice is warranted, keep it secondary and minimal
 - If no advice is warranted, do not invent any
 - End with a line that leaves the thought open, not a sign-off
-- Write the debrief in the same language as the transcript (Korean transcript -> Korean debrief)
+- Always write the debrief in English, even when the transcript is in another language. The conversation can be spoken in any language, but the debrief itself must always be in English. When you reference what someone said, translate it into natural English (you may keep a short original-language phrase in parentheses only if it genuinely matters).
 
 The goal is not to make the user feel coached. The goal is to make them feel accurately understood.`;
 
@@ -328,6 +328,7 @@ Do not force a win/loss frame. React to what is actually most alive in the inter
 Rules:
 - Pull something SPECIFIC from the debrief - a quote, a moment, a turn in the conversation
 - No vague generic encouragement
+- Always write in English, even if the recording or debrief is in another language
 - Casual and human, no markdown, no bullet points
 - Sound like a perceptive friend, not a coach
 - If there's genuinely nothing interesting to react to, respond with EXACTLY the word "SKIP" and nothing else
