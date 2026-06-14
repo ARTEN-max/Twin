@@ -15,10 +15,11 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.abdulrahman.twinai",
-      "buildNumber": "1",
+      "buildNumber": "2",
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Twin needs microphone access to record conversations for transcription and AI debriefs.",
         "NSSpeechRecognitionUsageDescription": "Twin uses speech recognition to help transcribe recordings. Audio may also be securely processed on Twin's servers to complete transcription and generate debriefs.",
+        "NSPhotoLibraryUsageDescription": "Twin may access your photo library to let you attach or upload images when viewing web content within the app.",
         "UIBackgroundModes": ["audio"],
         "ITSAppUsesNonExemptEncryption": false
       }
